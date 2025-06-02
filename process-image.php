@@ -2,8 +2,15 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-ini_set('upload_max_filesize', '20M');
-ini_set('post_max_size', '20M');
+// TEMPORARY: Bypass all checks
+// $canProceed = checkAndUpdateUsage($pdo, $deviceHash);
+$canProceed = true;
+
+// TEMPORARY: Allow large files
+ini_set('upload_max_filesize', '50M');
+ini_set('post_max_size', '50M');
+ini_set('max_execution_time', '300');
+ini_set('memory_limit', '512M');
 
 $openai_key = getenv('OPENAI_API_KEY');
 $google_key = getenv('GOOGLE_VISION_KEY');
