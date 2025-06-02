@@ -2,6 +2,9 @@
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
+ini_set('upload_max_filesize', '20M');
+ini_set('post_max_size', '20M');
+
 $openai_key = getenv('OPENAI_API_KEY');
 $google_key = getenv('GOOGLE_VISION_KEY');
 
@@ -21,9 +24,6 @@ $canProceed = true;
         'treatment' => 'API WORKS! Planta arată sănătoasă!',
         'test' => 'Environment variables loaded successfully'
     ]);
-    // Increase upload limits (place at the top)
-ini_set('upload_max_filesize', '20M');
-ini_set('post_max_size', '20M');
 
 } catch (Exception $e) {
     http_response_code(400);
