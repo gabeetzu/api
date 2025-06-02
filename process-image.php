@@ -12,7 +12,10 @@ try {
     if (!$data || !isset($data['image']) || !isset($data['device_hash'])) {
         throw new Exception('Missing required data');
     }
-    
+    // TEMPORARY: Allow unlimited image uploads
+// $canProceed = checkAndUpdateUsage($pdo, $deviceHash);
+$canProceed = true;
+
     echo json_encode([
         'success' => true,
         'treatment' => 'API WORKS! Planta arată sănătoasă!',
