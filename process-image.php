@@ -96,7 +96,7 @@ function checkUsageLimits($pdo, $deviceHash, $type) {
     }
 
     if ($type === 'image') {
-        $limit = $usage['premium'] ? 50 : 5; // 5 for free, 50 for premium
+        $limit = $usage['premium'] ? 5 : 1; // 5 for free, 50 for premium
         if ($usage['image_count'] >= $limit) {
             throw new Exception('Ați atins limita zilnică de ' . $limit . ' imagini. Upgrade la premium pentru mai multe.');
         }
