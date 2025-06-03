@@ -39,10 +39,10 @@ if ($apiKey !== $expectedKey) {
 error_log("API key verified successfully for image request");
 
 // ENHANCED: Configure for S24 Ultra and large images (200MP support)
-ini_set('upload_max_filesize', '100M');
-ini_set('post_max_size', '100M');
-ini_set('max_execution_time', '600'); // 10 minutes for large images
-ini_set('memory_limit', '1024M'); // 1GB for S24 Ultra processing
+ini_set('upload_max_filesize', '20M');
+ini_set('post_max_size', '20M');
+ini_set('max_execution_time', '120'); // 10 minutes for large images
+ini_set('memory_limit', '256M'); // 1GB for S24 Ultra processing
 ini_set('max_input_time', '300');
 
 error_log("PHP settings configured for S24 Ultra image processing");
