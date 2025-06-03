@@ -240,6 +240,50 @@ function validateTextInputEnterprise($message) {
     }
 }
 
+function sendProgressUpdate($phase, $message) {
+    // Only send if not cached response
+    static $updatesSent = 0;
+    $updatesSent++;
+    
+    // Limit updates to prevent spam
+    if ($updatesSent > 5) return;
+    
+    $progressData = [
+        'success' => true,
+        'status' => 'processing',
+        'phase' => $phase,
+        'message' => $message,
+        'timestamp' => time(),
+        'step' => $updatesSent
+    ];
+    
+    // Send progress update (non-blocking)
+    if (function_exists('fastcgi_finish_request')) {
+        echo json_encode($progressData) . "\n";
+        fastcgi_finish_request();
+    }
+    
+    error_log("Progress update sent: $phase - $message");
+}
+
+function getPhaseMessage($phase) {
+    $messages = [
+        'validating' => 'Validez mesajul...',
+        'analyzing' => 'Analizez conținutul...',
+        'thinking' => 'Mă gândesc la răspuns...',
+        'writing' => 'Scriu răspunsul...',
+        'preprocessing' => 'Optimizez imaginea...',
+        'vision_analysis' => 'Analizez imaginea cu AI...',
+        'content_analysis' => 'Identific planta...',
+        'ai_treatment' => 'Creez recomandările...',
+        'caching' => 'Salvez pentru viitor...',
+        'finalizing' => 'Finalizez răspunsul...'
+    ];
+    
+    return $messages[$phase] ?? 'Procesez...';
+}
+
+
 // ENTERPRISE SECURITY SCANNING FUNCTION
 function performSecurityScanEnterprise($message) {
     try {
