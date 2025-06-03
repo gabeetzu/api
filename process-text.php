@@ -30,10 +30,14 @@ try {
         throw new Exception('Mesajul nu poate fi gol');
     }
 
+    // ANTI-BOT PROTECTION - Check rate limits first
+    checkRateLimits($deviceHash);
+    detectSuspiciousActivity($deviceHash, $message);
+
     // Connect to database
     $pdo = connectToDatabase();
     
-    // Check usage limits with enhanced messaging
+    // Check usage limits
     checkUsageLimits($pdo, $deviceHash, 'text');
 
     // Save user message to chat history
@@ -60,6 +64,85 @@ try {
         'error' => $e->getMessage()
     ]);
 }
+
+// ANTI-BOT FUNCTIONS
+function checkRateLimits($deviceHash) {
+    $rateLimitFile = '/tmp/rate_limit_' . $deviceHash . '.txt';
+    $currentTime = time();
+    
+    // Clean old entries
+    if (file_exists($rateLimitFile)) {
+        $requests = json_decode(file_get_contents($rateLimitFile), true) ?: [];
+        $requests = array_filter($requests, function($timestamp) use ($currentTime) {
+            return ($currentTime - $timestamp) < 60; // Keep only last minute
+        });
+    } else {
+        $requests = [];
+    }
+    
+    // Check if limit exceeded (10 requests per minute)
+    if (count($requests) >= 10) {
+        throw new Exception('Prea multe cereri. Încercați din nou în 1 minut.');
+    }
+    
+    // Add current request
+    $requests[] = $currentTime;
+    file_put_contents($rateLimitFile, json_encode($requests));
+}
+
+function detectSuspiciousActivity($deviceHash, $message) {
+    $messageHash = md5($message);
+    $suspiciousFile = '/tmp/suspicious_' . $deviceHash . '_' . $messageHash . '.txt';
+    $currentTime = time();
+    
+    // Check for repeated identical messages
+    if (file_exists($suspiciousFile)) {
+        $data = json_decode(file_get_contents($suspiciousFile), true);
+        $count = $data['count'] ?? 0;
+        $lastTime = $data['last_time'] ?? 0;
+        
+        // Reset count if more than 1 hour passed
+        if (($currentTime - $lastTime) > 3600) {
+            $count = 0;
+        }
+        
+        $count++;
+        
+        if ($count > 3) {
+            throw new Exception('Mesaj repetat prea des. Încercați o întrebare diferită.');
+        }
+        
+        file_put_contents($suspiciousFile, json_encode([
+            'count' => $count,
+            'last_time' => $currentTime
+        ]));
+    } else {
+        file_put_contents($suspiciousFile, json_encode([
+            'count' => 1,
+            'last_time' => $currentTime
+        ]));
+    }
+    
+    // Check for rapid-fire requests
+    $rapidFile = '/tmp/rapid_' . $deviceHash . '.txt';
+    if (file_exists($rapidFile)) {
+        $rapidRequests = json_decode(file_get_contents($rapidFile), true) ?: [];
+        $rapidRequests = array_filter($rapidRequests, function($timestamp) use ($currentTime) {
+            return ($currentTime - $timestamp) < 10; // Last 10 seconds
+        });
+        
+        if (count($rapidRequests) >= 5) {
+            throw new Exception('Cereri prea rapide. Așteptați câteva secunde.');
+        }
+        
+        $rapidRequests[] = $currentTime;
+        file_put_contents($rapidFile, json_encode($rapidRequests));
+    } else {
+        file_put_contents($rapidFile, json_encode([$currentTime]));
+    }
+}
+
+// ... [Keep all your existing functions: connectToDatabase, checkUsageLimits, etc.] ...
 
 function connectToDatabase() {
     $host = getenv('DB_HOST');
@@ -106,11 +189,6 @@ function checkUsageLimits($pdo, $deviceHash, $type) {
                 throw new Exception('Ați folosit toate cele 10 întrebări gratuite de astăzi! Upgradeați la Premium pentru întrebări nelimitate sau urmăriți o reclamă pentru 3 întrebări extra.');
             }
         }
-        
-        // Friendly reminder when approaching limit
-        if (!$usage['premium'] && $remaining <= 2 && $remaining > 0) {
-            // This could be logged or used for analytics, but not thrown as exception
-        }
     }
 }
 
@@ -140,7 +218,6 @@ function getTextResponseFromOpenAI($message) {
         throw new Exception('Serviciul de răspunsuri nu este disponibil momentan');
     }
 
-    // Enhanced system prompt for better Romanian gardening advice
     $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență, cunoscut pentru sfaturile practice și rezultatele excelente.
 
 PERSONALITATEA TA:
