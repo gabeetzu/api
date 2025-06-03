@@ -122,11 +122,13 @@ try {
 
     // ENTERPRISE PIPELINE - Step 8: S24 Ultra Image Preprocessing
     error_log("STEP 8: Enterprise S24 Ultra image preprocessing and optimization...");
+    sendProgressUpdate('preprocessing', 'Optimizez imaginea...');
     $optimizedImageBase64 = preprocessImageForAnalysisEnterprise($imageBase64, $estimatedSizeMB);
     error_log("Enterprise image preprocessing completed");
 
     // ENTERPRISE PIPELINE - Step 9: Enhanced Google Vision Analysis
     error_log("STEP 9: Enterprise Google Vision analysis with advanced detection...");
+    sendProgressUpdate('vision_analysis', 'Analizez imaginea cu AI...');
     $visionResults = analyzeWithGoogleVisionEnterprise($optimizedImageBase64);
     error_log("Enterprise Google Vision analysis completed");
     error_log("Vision results - Objects: " . count($visionResults['objects']) . ", Labels: " . count($visionResults['labels']));
@@ -139,11 +141,13 @@ try {
 
     // ENTERPRISE PIPELINE - Step 11: Content Analysis for Images
     error_log("STEP 11: Enterprise image content analysis and classification...");
+    sendProgressUpdate('content_analysis', 'Identific planta...');
     $imageAnalysis = analyzeImageContentEnterprise($visionResults, $userContext);
     error_log("Enterprise image analysis result: " . json_encode($imageAnalysis));
 
     // ENTERPRISE PIPELINE - Step 12: Enhanced AI Treatment Analysis
     error_log("STEP 12: Enterprise AI treatment analysis with context awareness...");
+    sendProgressUpdate('ai_treatment', 'Creez recomandările...');
     $treatment = getEnhancedImageTreatmentEnterprise($visionResults, $imageAnalysis, $userContext);
     error_log("Enterprise AI treatment response generated successfully (length: " . strlen($treatment) . ")");
 
@@ -207,6 +211,51 @@ try {
         'error' => $e->getMessage()
     ]);
 }
+
+function sendProgressUpdate($phase, $message) {
+    // Only send if not cached response
+    static $updatesSent = 0;
+    $updatesSent++;
+    
+    // Limit updates to prevent spam
+    if ($updatesSent > 5) return;
+    
+    $progressData = [
+        'success' => true,
+        'status' => 'processing',
+        'phase' => $phase,
+        'message' => $message,
+        'timestamp' => time(),
+        'step' => $updatesSent
+    ];
+    
+    // Send progress update (non-blocking)
+    if (function_exists('fastcgi_finish_request')) {
+        echo json_encode($progressData) . "\n";
+        fastcgi_finish_request();
+    }
+    
+    error_log("Progress update sent: $phase - $message");
+}
+
+function getPhaseMessage($phase) {
+    $messages = [
+        'validating' => 'Validez mesajul...',
+        'analyzing' => 'Analizez conținutul...',
+        'thinking' => 'Mă gândesc la răspuns...',
+        'writing' => 'Scriu răspunsul...',
+        'preprocessing' => 'Optimizez imaginea...',
+        'vision_analysis' => 'Analizez imaginea cu AI...',
+        'content_analysis' => 'Identific planta...',
+        'ai_treatment' => 'Creez recomandările...',
+        'caching' => 'Salvez pentru viitor...',
+        'finalizing' => 'Finalizez răspunsul...'
+    ];
+    
+    return $messages[$phase] ?? 'Procesez...';
+}
+
+
 // ENTERPRISE IMAGE VALIDATION FUNCTION with S24 Ultra support
 function validateImageDataEnterprise($imageBase64, $estimatedSizeMB) {
     try {
