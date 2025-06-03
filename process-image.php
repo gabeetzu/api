@@ -15,14 +15,20 @@ try {
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
 
+    // Validate input
     if (!$data || !isset($data['image']) || !isset($data['device_hash'])) {
-        throw new Exception('Date lipsă');
+        throw new Exception('Date lipsă: Imaginea sau hash-ul dispozitivului nu au fost primite');
     }
 
     $imageBase64 = $data['image'];
 
     // Step 1: Analyze with Google Vision
     $visionResults = analyzeWithGoogleVision($imageBase64);
+
+    // Validate Vision API results
+    if (empty($visionResults['objects']) && empty($visionResults['labels'])) {
+        throw new Exception('Nu s-au detectat obiecte sau etichete în imagine');
+    }
 
     // Step 2: Get treatment from OpenAI
     $treatment = getTreatmentFromOpenAI($visionResults);
@@ -35,11 +41,18 @@ try {
 
 } catch (Exception $e) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    echo json_encode([
+        'success' => false,
+        'error' => $e->getMessage()
+    ]);
 }
 
 function analyzeWithGoogleVision($imageBase64) {
     $googleVisionKey = getenv('GOOGLE_VISION_KEY');
+    if (!$googleVisionKey) {
+        throw new Exception('Cheia Google Vision nu este configurată corect');
+    }
+
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . $googleVisionKey;
 
     $requestData = [
@@ -59,6 +72,11 @@ function analyzeWithGoogleVision($imageBase64) {
 
     $response = curl_exec($ch);
     $result = json_decode($response, true);
+
+    // Handle Vision API errors
+    if (isset($result['error'])) {
+        throw new Exception('Eroare Google Vision: ' . $result['error']['message']);
+    }
 
     $objects = [];
     $labels = [];
@@ -83,6 +101,10 @@ function analyzeWithGoogleVision($imageBase64) {
 
 function getTreatmentFromOpenAI($visionResults) {
     $openaiKey = getenv('OPENAI_API_KEY');
+    if (!$openaiKey) {
+        throw new Exception('Cheia OpenAI nu este configurată corect');
+    }
+
     $objects = implode(', ', $visionResults['objects']);
     $labels = implode(', ', $visionResults['labels']);
 
@@ -98,11 +120,21 @@ function getTreatmentFromOpenAI($visionResults) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
         'model' => 'gpt-4o-mini',
         'messages' => [['role' => 'user', 'content' => $prompt]],
-        'max_tokens' => 500
+        'max_tokens' => 500,
+        'temperature' => 0.7
     ]));
 
     $response = curl_exec($ch);
     $data = json_decode($response, true);
+
+    // Handle OpenAI API errors
+    if (isset($data['error'])) {
+        throw new Exception('Eroare OpenAI: ' . $data['error']['message']);
+    }
+
+    if (!isset($data['choices'][0]['message']['content'])) {
+        throw new Exception('Răspuns neașteptat de la OpenAI');
+    }
 
     return $data['choices'][0]['message']['content'];
 }
