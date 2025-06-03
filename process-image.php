@@ -27,7 +27,7 @@ try {
 
     // Validate Vision API results
     if (empty($visionResults['objects']) && empty($visionResults['labels'])) {
-        throw new Exception('Nu s-au detectat obiecte sau etichete în imagine');
+        throw new Exception('Imaginea nu conține elemente recunoscute');
     }
 
     // Step 2: Get treatment from OpenAI
@@ -133,7 +133,7 @@ function getTreatmentFromOpenAI($visionResults) {
     }
 
     if (!isset($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns neașteptat de la OpenAI');
+        throw new Exception('Răspuns invalid de la OpenAI');
     }
 
     return $data['choices'][0]['message']['content'];
