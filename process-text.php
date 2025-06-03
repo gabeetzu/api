@@ -448,13 +448,23 @@ function detectSuspiciousActivity($deviceHash, $message) {
 }
 
 function cleanForTTS($text) {
-    $text = preg_replace('/\*+/', '', $text);
-    $text = preg_replace('/^\d+\.\s*/m', '', $text);
-    $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);
-    $text = preg_replace('/\s+/', ' ', $text);
-    $text = preg_replace('/[#@$%^&(){}[\]|\\]/', '', $text);
-    $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);
-    $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);
+    // Handle null input
+    if ($text === null || $text === '') {
+        return '';
+    }
+    
+    // Convert to string if not already
+    $text = (string) $text;
+    
+    // Clean text for TTS - FIXED regex patterns
+    $text = preg_replace('/\*+/', '', $text);                    // Remove asterisks
+    $text = preg_replace('/^\d+\.\s*/m', '', $text);            // Remove numbered lists
+    $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);         // Remove bullet points
+    $text = preg_replace('/\s+/', ' ', $text);                  // Multiple spaces to single
+    $text = preg_replace('/[#@$%^&(){}|\\\\]/', '', $text);     // FIXED: Escaped brackets properly
+    $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);   // Fix punctuation spacing
+    $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);       // Remove percentages
+    
     return trim($text);
 }
 
