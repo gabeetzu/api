@@ -33,7 +33,7 @@ try {
     // Connect to database
     $pdo = connectToDatabase();
     
-    // Check image usage limits
+    // Check image usage limits with enhanced messaging
     checkUsageLimits($pdo, $deviceHash, 'image');
 
     // Step 1: Analyze with Google Vision
@@ -41,15 +41,15 @@ try {
 
     // Validate Vision API results
     if (empty($visionResults['objects']) && empty($visionResults['labels'])) {
-        throw new Exception('Imaginea nu conține elemente recunoscute');
+        throw new Exception('Nu am putut identifica plante în această imagine. Încercați o poză mai clară cu planta în prim-plan.');
     }
 
-    // Step 2: Get treatment from OpenAI
+    // Step 2: Get enhanced treatment from OpenAI
     $treatment = getTreatmentFromOpenAI($visionResults);
 
     // Save to chat history
-    saveChatHistory($pdo, $deviceHash, "", true, 'image', $imageBase64); // User image
-    saveChatHistory($pdo, $deviceHash, $treatment, false, 'text', null); // Bot response
+    saveChatHistory($pdo, $deviceHash, "", true, 'image', $imageBase64);
+    saveChatHistory($pdo, $deviceHash, $treatment, false, 'text', null);
 
     // Record usage
     recordUsage($pdo, $deviceHash, 'image');
@@ -68,7 +68,6 @@ try {
     ]);
 }
 
-// Database functions (same as process-text.php)
 function connectToDatabase() {
     $host = getenv('DB_HOST');
     $dbname = getenv('DB_NAME');
@@ -95,17 +94,23 @@ function checkUsageLimits($pdo, $deviceHash, $type) {
 
     if (!$usage) {
         $stmt = $pdo->prepare("
-            INSERT INTO usage_tracking (device_hash, date, image_count) 
-            VALUES (?, ?, 0)
+            INSERT INTO usage_tracking (device_hash, date, image_count, premium) 
+            VALUES (?, ?, 0, 0)
         ");
         $stmt->execute([$deviceHash, $today]);
         $usage = ['image_count' => 0, 'premium' => 0];
     }
 
     if ($type === 'image') {
-        $limit = $usage['premium'] ? 5 : 1; // 5 for free, 50 for premium
+        $limit = $usage['premium'] ? 5 : 1;
+        $remaining = $limit - $usage['image_count'];
+        
         if ($usage['image_count'] >= $limit) {
-            throw new Exception('Ați atins limita zilnică de ' . $limit . ' imagini. Upgrade la premium pentru mai multe.');
+            if ($usage['premium']) {
+                throw new Exception('Ați atins limita zilnică de 5 imagini premium. Reveniți mâine pentru analize noi!');
+            } else {
+                throw new Exception('Ați folosit analiza gratuită de astăzi! Upgradeați la Premium pentru 5 analize zilnice sau urmăriți o reclamă pentru o analiză extra.');
+            }
         }
     }
 }
@@ -136,9 +141,136 @@ function saveChatHistory($pdo, $deviceHash, $messageText, $isUserMessage, $messa
     ]);
 }
 
-// Existing vision/openai functions remain the same
-function analyzeWithGoogleVision($imageBase64) { /* ... */ }
-function getTreatmentFromOpenAI($visionResults) { /* ... */ }
-function cleanForTTS($text) { /* ... */ }
+function analyzeWithGoogleVision($imageBase64) {
+    $googleVisionKey = getenv('GOOGLE_VISION_KEY');
+    if (!$googleVisionKey) {
+        throw new Exception('Serviciul de analiză imagini nu este disponibil momentan');
+    }
+
+    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . $googleVisionKey;
+
+    $requestData = [
+        'requests' => [[
+            'image' => ['content' => $imageBase64],
+            'features' => [
+                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 15],
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 15]
+            ]
+        ]]
+    ];
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
+
+    $response = curl_exec($ch);
+    $result = json_decode($response, true);
+
+    if (isset($result['error'])) {
+        throw new Exception('Eroare la analiza imaginii: ' . $result['error']['message']);
+    }
+
+    $objects = [];
+    $labels = [];
+
+    if (isset($result['responses'][0]['localizedObjectAnnotations'])) {
+        foreach ($result['responses'][0]['localizedObjectAnnotations'] as $obj) {
+            $objects[] = $obj['name'];
+        }
+    }
+
+    if (isset($result['responses'][0]['labelAnnotations'])) {
+        foreach ($result['responses'][0]['labelAnnotations'] as $label) {
+            $labels[] = $label['description'];
+        }
+    }
+
+    return [
+        'objects' => $objects,
+        'labels' => $labels
+    ];
+}
+
+function getTreatmentFromOpenAI($visionResults) {
+    $openaiKey = getenv('OPENAI_API_KEY');
+    if (!$openaiKey) {
+        throw new Exception('Serviciul de analiză nu este disponibil momentan');
+    }
+
+    $objects = implode(', ', $visionResults['objects']);
+    $labels = implode(', ', $visionResults['labels']);
+
+    $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență. 
+
+REGULI IMPORTANTE pentru analiza imaginilor:
+- Analizezi imaginea bazându-te pe obiectele și etichetele detectate
+- Identifici tipul de plantă, problemele vizibile și starea generală
+- Dai sfaturi practice și specifice pentru clima României
+- Menționezi anotimpul potrivit pentru tratamente
+- Folosești termeni simpli, fără formatare specială
+- Răspunsurile să fie între 150-400 de cuvinte, detaliate și utile
+- Dacă vezi semne de boală sau dăunători, explici cum să tratezi
+
+Cunoștințele tale includ:
+- Identificarea plantelor românești comune
+- Boli și dăunători specifici României
+- Tratamente naturale și chimice disponibile local
+- Tehnici de îngrijire pentru clima continentală";
+
+    $prompt = "Analizează această imagine de grădină. 
+
+Obiecte detectate: $objects
+Etichete identificate: $labels
+
+Te rog să îmi oferi:
+1. Ce tip de plantă/plante vezi
+2. Starea lor de sănătate
+3. Probleme vizibile (dacă există)
+4. Sfaturi concrete de îngrijire
+5. Când și cum să aplici tratamentele";
+
+    $ch = curl_init('https://api.openai.com/v1/chat/completions');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $openaiKey
+    ]);
+
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+        'model' => 'gpt-4o-mini',
+        'messages' => [
+            ['role' => 'system', 'content' => $systemPrompt],
+            ['role' => 'user', 'content' => $prompt]
+        ],
+        'max_tokens' => 1200,
+        'temperature' => 0.7
+    ]));
+
+    $response = curl_exec($ch);
+    $data = json_decode($response, true);
+
+    if (isset($data['error'])) {
+        throw new Exception('Nu am putut analiza imaginea momentan. Încercați din nou.');
+    }
+
+    if (!isset($data['choices'][0]['message']['content'])) {
+        throw new Exception('Analiza imaginii a eșuat. Încercați cu o altă poză.');
+    }
+
+    $content = $data['choices'][0]['message']['content'];
+    return cleanForTTS($content);
+}
+
+function cleanForTTS($text) {
+    $text = preg_replace('/\*+/', '', $text);
+    $text = preg_replace('/^\d+\.\s*/m', '', $text);
+    $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);
+    $text = preg_replace('/\s+/', ' ', $text);
+    $text = preg_replace('/[#@$%^&(){}[\]|\\]/', '', $text);
+    $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);
+    $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);
+    return trim($text);
+}
 
 ?>
