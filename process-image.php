@@ -30,6 +30,10 @@ try {
     $imageBase64 = $data['image'];
     $deviceHash = $data['device_hash'];
 
+    // ANTI-BOT PROTECTION - Check rate limits first
+    checkRateLimits($deviceHash);
+    detectSuspiciousImageActivity($deviceHash, $imageBase64);
+
     // Connect to database
     $pdo = connectToDatabase();
     
@@ -66,6 +70,83 @@ try {
         'success' => false,
         'error' => $e->getMessage()
     ]);
+}
+
+// ANTI-BOT PROTECTION FUNCTIONS
+function checkRateLimits($deviceHash) {
+    $rateLimitFile = '/tmp/rate_limit_' . $deviceHash . '.txt';
+    $currentTime = time();
+    
+    // Clean old entries
+    if (file_exists($rateLimitFile)) {
+        $requests = json_decode(file_get_contents($rateLimitFile), true) ?: [];
+        $requests = array_filter($requests, function($timestamp) use ($currentTime) {
+            return ($currentTime - $timestamp) < 60; // Keep only last minute
+        });
+    } else {
+        $requests = [];
+    }
+    
+    // Check if limit exceeded (10 requests per minute)
+    if (count($requests) >= 10) {
+        throw new Exception('Prea multe cereri. Încercați din nou în 1 minut.');
+    }
+    
+    // Add current request
+    $requests[] = $currentTime;
+    file_put_contents($rateLimitFile, json_encode($requests));
+}
+
+function detectSuspiciousImageActivity($deviceHash, $imageBase64) {
+    $imageHash = md5($imageBase64);
+    $suspiciousFile = '/tmp/img_suspicious_' . $deviceHash . '_' . $imageHash . '.txt';
+    $currentTime = time();
+    
+    // Check for repeated identical images
+    if (file_exists($suspiciousFile)) {
+        $data = json_decode(file_get_contents($suspiciousFile), true);
+        $count = $data['count'] ?? 0;
+        $lastTime = $data['last_time'] ?? 0;
+        
+        // Reset count if more than 1 hour passed
+        if (($currentTime - $lastTime) > 3600) {
+            $count = 0;
+        }
+        
+        $count++;
+        
+        if ($count > 2) {
+            throw new Exception('Aceeași imagine trimisă prea des. Încercați o imagine diferită.');
+        }
+        
+        file_put_contents($suspiciousFile, json_encode([
+            'count' => $count,
+            'last_time' => $currentTime
+        ]));
+    } else {
+        file_put_contents($suspiciousFile, json_encode([
+            'count' => 1,
+            'last_time' => $currentTime
+        ]));
+    }
+    
+    // Check for rapid-fire image requests
+    $rapidFile = '/tmp/rapid_img_' . $deviceHash . '.txt';
+    if (file_exists($rapidFile)) {
+        $rapidRequests = json_decode(file_get_contents($rapidFile), true) ?: [];
+        $rapidRequests = array_filter($rapidRequests, function($timestamp) use ($currentTime) {
+            return ($currentTime - $timestamp) < 30; // Last 30 seconds for images
+        });
+        
+        if (count($rapidRequests) >= 3) {
+            throw new Exception('Prea multe imagini trimise rapid. Așteptați puțin între analize.');
+        }
+        
+        $rapidRequests[] = $currentTime;
+        file_put_contents($rapidFile, json_encode($rapidRequests));
+    } else {
+        file_put_contents($rapidFile, json_encode([$currentTime]));
+    }
 }
 
 function connectToDatabase() {
