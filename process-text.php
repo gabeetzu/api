@@ -1,5 +1,4 @@
 <?php
-// Complete process-text.php with database integration and improved responses
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -34,7 +33,7 @@ try {
     // Connect to database
     $pdo = connectToDatabase();
     
-    // Check usage limits
+    // Check usage limits with enhanced messaging
     checkUsageLimits($pdo, $deviceHash, 'text');
 
     // Save user message to chat history
@@ -69,13 +68,10 @@ function connectToDatabase() {
     $password = getenv('DB_PASS');
     
     $dsn = "mysql:host=$host;dbname=$dbname;charset=utf8mb4";
-    $options = [
+    return new PDO($dsn, $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ];
-    
-    return new PDO($dsn, $username, $password, $options);
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
 }
 
 function checkUsageLimits($pdo, $deviceHash, $type) {
@@ -101,8 +97,19 @@ function checkUsageLimits($pdo, $deviceHash, $type) {
     if ($type === 'text') {
         $limit = $usage['premium'] ? 100 : 10;
         $totalUsed = $usage['text_count'] - $usage['extra_questions'];
+        $remaining = $limit - $totalUsed;
+        
         if ($totalUsed >= $limit) {
-            throw new Exception('Ați atins limita zilnică de întrebări. Urmăriți o reclamă pentru întrebări extra sau upgradeați la premium.');
+            if ($usage['premium']) {
+                throw new Exception('Ați atins limita zilnică de 100 întrebări premium. Impresionant! Reveniți mâine pentru mai multe.');
+            } else {
+                throw new Exception('Ați folosit toate cele 10 întrebări gratuite de astăzi! Upgradeați la Premium pentru întrebări nelimitate sau urmăriți o reclamă pentru 3 întrebări extra.');
+            }
+        }
+        
+        // Friendly reminder when approaching limit
+        if (!$usage['premium'] && $remaining <= 2 && $remaining > 0) {
+            // This could be logged or used for analytics, but not thrown as exception
         }
     }
 }
@@ -130,28 +137,35 @@ function saveChatHistory($pdo, $deviceHash, $messageText, $isUserMessage, $messa
 function getTextResponseFromOpenAI($message) {
     $openaiKey = getenv('OPENAI_API_KEY');
     if (!$openaiKey) {
-        throw new Exception('Cheia OpenAI nu este configurată corect');
+        throw new Exception('Serviciul de răspunsuri nu este disponibil momentan');
     }
 
     // Enhanced system prompt for better Romanian gardening advice
-    $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență. 
+    $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență, cunoscut pentru sfaturile practice și rezultatele excelente.
+
+PERSONALITATEA TA:
+- Vorbești natural și prietenos, ca un vecin cu experiență
+- Ești entuziast și încurajator
+- Dai sfaturi concrete și testate personal
+- Explici de ce funcționează anumite metode
 
 REGULI IMPORTANTE:
 - Răspunzi DOAR la întrebări despre plante, grădină, agricultură și grădinărit
-- Dacă întrebarea nu e despre grădinărit, spui politicos că poți ajuta doar cu sfaturi de grădină
-- Vorbești natural, ca un prieten cu experiență, fără formalități excesive
+- Dacă întrebarea nu e despre grădinărit, spui politicos că te specializezi doar în grădinărit
 - Folosești termeni simpli, accesibili oricărui grădinar român
-- Dai sfaturi practice, testate și aplicabile în România
-- Menționezi anotimpul potrivit pentru activități
+- Menționezi anotimpul potrivit și specificul climei românești
 - Eviți asteriscuri, numere în paranteză sau formatare specială
-- Răspunsurile să fie între 100-300 de cuvinte, clare și practice
+- Răspunsurile să fie între 120-350 de cuvinte, clare și practice
+- Incluzi trucuri și secrete din experiența ta
 
-Cunoștințele tale includ:
-- Plantele cultivate în clima României
-- Boli și dăunători comuni în România  
+EXPERTIZA TA:
+- Plantele cultivate în clima României (continentală)
+- Boli și dăunători comuni în România și tratamentele lor
 - Produse și îngrășăminte disponibile în România
-- Anotimpurile și climatul specific României
-- Tehnici tradiționale românești de grădinărit";
+- Perioade optime pentru fiecare activitate de grădinărit
+- Tehnici tradiționale românești și moderne
+- Soiuri rezistente la clima noastră
+- Probleme specifice solurilor românești";
 
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -166,8 +180,8 @@ Cunoștințele tale includ:
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $message]
         ],
-        'max_tokens' => 800, // Increased from 500
-        'temperature' => 0.7,
+        'max_tokens' => 900,
+        'temperature' => 0.8,
         'top_p' => 0.9
     ]));
 
@@ -176,49 +190,31 @@ Cunoștințele tale includ:
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        throw new Exception('Eroare OpenAI API: HTTP ' . $httpCode);
+        throw new Exception('Nu pot răspunde momentan. Încercați din nou în câteva secunde.');
     }
 
     $data = json_decode($response, true);
 
     if (isset($data['error'])) {
-        throw new Exception('Eroare OpenAI: ' . $data['error']['message']);
+        throw new Exception('Serviciul este temporar indisponibil. Încercați din nou.');
     }
 
     if (!isset($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la OpenAI');
+        throw new Exception('Nu am putut genera un răspuns. Reformulați întrebarea.');
     }
 
     $content = $data['choices'][0]['message']['content'];
-    
-    // Clean content for TTS
-    $cleanContent = cleanForTTS($content);
-    
-    return $cleanContent;
+    return cleanForTTS($content);
 }
 
 function cleanForTTS($text) {
-    // Remove asterisks and markdown formatting
     $text = preg_replace('/\*+/', '', $text);
-    
-    // Remove numbered lists (1., 2., 3., etc.)
     $text = preg_replace('/^\d+\.\s*/m', '', $text);
-    
-    // Remove bullet points
     $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);
-    
-    // Replace multiple spaces with single space
     $text = preg_replace('/\s+/', ' ', $text);
-    
-    // Remove special characters that TTS reads awkwardly
     $text = preg_replace('/[#@$%^&(){}[\]|\\]/', '', $text);
-    
-    // Clean up spacing around punctuation
     $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);
-    
-    // Remove parenthetical percentages like (85%)
     $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);
-    
     return trim($text);
 }
 
