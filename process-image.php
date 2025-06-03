@@ -5,6 +5,13 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST');
 header('Access-Control-Allow-Headers: Content-Type');
 
+// Verify API Key
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+if ($apiKey !== getenv('API_SECRET_KEY')) {
+    http_response_code(401);
+    die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
+}
+
 // Allow large files (50MB)
 ini_set('upload_max_filesize', '50M');
 ini_set('post_max_size', '50M');
