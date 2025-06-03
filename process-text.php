@@ -66,4 +66,21 @@ function getTextResponseFromOpenAI($message) {
 
     return $data['choices'][0]['message']['content'];
 }
+
+// Add usage check
+    $pdo = new PDO("mysql:host=localhost;dbname=yourdb", "user", "pass");
+    $stmt = $pdo->prepare("SELECT count FROM usage WHERE device_hash = ?");
+    $stmt->execute([$deviceHash]);
+    $usage = $stmt->fetchColumn();
+    
+    if ($usage >= 5) { // Free tier limit
+        throw new Exception('Ați atins limita zilnică de întrebări');
+    }
+
+    // ... OpenAI call ...
+
+} catch (Exception $e) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+}
 ?>
