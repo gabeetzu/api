@@ -658,7 +658,7 @@ STRUCTURA RĂSPUNSULUI:
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $enhancedPrompt]
         ],
-        'max_tokens' => 1200,
+        'max_tokens' => 600,
         'temperature' => $contentAnalysis['urgency'] === 'high' ? 0.3 : 0.8, // Lower temperature for urgent issues
         'top_p' => 0.9,
         'frequency_penalty' => 0.1,
