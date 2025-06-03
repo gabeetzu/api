@@ -697,7 +697,7 @@ Dacă ai identificat text în imagine (etichete, semne), folosește aceste infor
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $prompt]
         ],
-        'max_tokens' => 600, // Increased for comprehensive analysis
+        'max_tokens' => 1500, // Increased for comprehensive analysis
         'temperature' => 0.7,
         'top_p' => 0.9
     ]));
