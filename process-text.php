@@ -6,6 +6,13 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST');
 header('Access-Control-Allow-Headers: Content-Type');
 
+// Verify API Key
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+if ($apiKey !== getenv('API_SECRET_KEY')) {
+    http_response_code(401);
+    die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
+}
+
 ini_set('max_execution_time', '60');
 ini_set('memory_limit', '256M');
 
