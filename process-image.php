@@ -5,8 +5,9 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST');
 header('Access-Control-Allow-Headers: Content-Type');
 
-// COMPREHENSIVE DEBUG: Log all environment variables and request details
-error_log("=== ENHANCED IMAGE PROCESSING DEBUG START ===");
+// COMPREHENSIVE DEBUG: Enhanced logging for enterprise image processing
+error_log("=== ENTERPRISE IMAGE PROCESSING START ===");
+error_log("Timestamp: " . date('Y-m-d H:i:s'));
 error_log("API_SECRET_KEY exists: " . (getenv('API_SECRET_KEY') ? 'YES' : 'NO'));
 error_log("GOOGLE_VISION_KEY exists: " . (getenv('GOOGLE_VISION_KEY') ? 'YES' : 'NO'));
 error_log("OPENAI_API_KEY exists: " . (getenv('OPENAI_API_KEY') ? 'YES' : 'NO'));
@@ -17,45 +18,47 @@ error_log("Request method: " . $_SERVER['REQUEST_METHOD']);
 error_log("Content type: " . ($_SERVER['CONTENT_TYPE'] ?? 'not set'));
 error_log("User agent: " . ($_SERVER['HTTP_USER_AGENT'] ?? 'not set'));
 error_log("X-API-Key header: " . ($_SERVER['HTTP_X_API_KEY'] ?? 'not set'));
+error_log("Client IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
 
 $rawInput = file_get_contents('php://input');
 error_log("Raw input length: " . strlen($rawInput));
 error_log("Raw input preview: " . substr($rawInput, 0, 100) . "...");
 error_log("Memory usage before processing: " . memory_get_usage(true) / 1024 / 1024 . " MB");
-error_log("=== ENHANCED IMAGE PROCESSING DEBUG END ===");
+error_log("Server load: " . (function_exists('sys_getloadavg') ? implode(', ', sys_getloadavg()) : 'N/A'));
+error_log("=== ENTERPRISE IMAGE PROCESSING DEBUG END ===");
 
 // Verify API Key with enhanced logging
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 
-error_log("API Key comparison - Received: " . substr($apiKey, 0, 10) . "... Expected: " . substr($expectedKey, 0, 10) . "...");
+error_log("API Key verification - Received length: " . strlen($apiKey) . ", Expected length: " . strlen($expectedKey));
 
 if ($apiKey !== $expectedKey) {
-    error_log("API key mismatch - Authentication failed for image request");
+    error_log("API key mismatch - Authentication failed for enterprise image request");
     http_response_code(401);
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
 }
 
-error_log("API key verified successfully for image request");
+error_log("API key verified successfully for enterprise image request");
 
-// ENHANCED: Configure for S24 Ultra and large images (200MP support)
-ini_set('upload_max_filesize', '20M');
-ini_set('post_max_size', '20M');
-ini_set('max_execution_time', '120'); // 10 minutes for large images
-ini_set('memory_limit', '256M'); // 1GB for S24 Ultra processing
-ini_set('max_input_time', '300');
+// ENTERPRISE: Configure for S24 Ultra and large images (Starter plan optimized)
+ini_set('upload_max_filesize', '50M');
+ini_set('post_max_size', '50M');
+ini_set('max_execution_time', '90');    // Optimized for Starter plan
+ini_set('memory_limit', '512M');        // Sufficient for image processing
+ini_set('max_input_time', '60');
 
-error_log("PHP settings configured for S24 Ultra image processing");
+error_log("PHP settings configured for enterprise S24 Ultra image processing");
 
 try {
-    error_log("Starting enhanced image processing request...");
+    error_log("Starting enterprise image processing pipeline...");
     
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
 
-    // ENHANCED: Validate input with comprehensive logging
+    // ENHANCED: Comprehensive input validation
     if (!$data || !isset($data['image']) || !isset($data['device_hash'])) {
-        error_log("Invalid image request data - missing required fields");
+        error_log("Invalid enterprise image request - missing required fields");
         error_log("Data keys present: " . (is_array($data) ? implode(', ', array_keys($data)) : 'not an array'));
         throw new Exception('Date lipsă: Imaginea sau hash-ul dispozitivului nu au fost primite');
     }
@@ -63,104 +66,140 @@ try {
     $imageBase64 = $data['image'];
     $deviceHash = $data['device_hash'];
 
-    error_log("Processing image from device: $deviceHash");
+    error_log("Processing enterprise image from device: $deviceHash");
     error_log("Image base64 length: " . strlen($imageBase64));
     
-    // ENHANCED: Calculate actual image size and validate
+    // Calculate actual image size
     $estimatedSizeKB = round((strlen($imageBase64) * 0.75) / 1024, 2);
     $estimatedSizeMB = round($estimatedSizeKB / 1024, 2);
     error_log("Estimated image size: {$estimatedSizeKB} KB ({$estimatedSizeMB} MB)");
 
-    // S24 ULTRA FIX: Validate image size before processing
-    if ($estimatedSizeMB > 50) {
-        error_log("Image too large: {$estimatedSizeMB} MB - rejecting to prevent crash");
-        throw new Exception('Imaginea este prea mare (' . $estimatedSizeMB . ' MB). Te rog să folosești o imagine mai mică de 50 MB.');
+    // ENTERPRISE PIPELINE - Step 1: Advanced Image Validation
+    error_log("STEP 1: Enterprise image validation and S24 Ultra compatibility check...");
+    validateImageDataEnterprise($imageBase64, $estimatedSizeMB);
+    
+    // ENTERPRISE PIPELINE - Step 2: Security Scanning
+    error_log("STEP 2: Enterprise image security scanning...");
+    performImageSecurityScanEnterprise($imageBase64);
+
+    // ENTERPRISE PIPELINE - Step 3: Anti-Bot Protection
+    error_log("STEP 3: Enterprise anti-bot protection for images...");
+    checkImageRateLimitsEnterprise($deviceHash);
+    detectSuspiciousImageActivityEnterprise($deviceHash, $imageBase64);
+
+    // ENTERPRISE PIPELINE - Step 4: Database Connection
+    error_log("STEP 4: Enterprise database connection...");
+    $pdo = connectToDatabaseEnterprise();
+    error_log("Enterprise database connection successful");
+    
+    // ENTERPRISE PIPELINE - Step 5: Usage Limits Check
+    error_log("STEP 5: Enterprise image usage limits verification...");
+    checkUsageLimitsEnterprise($pdo, $deviceHash, 'image');
+
+    // ENTERPRISE PIPELINE - Step 6: Image Cache Check
+    error_log("STEP 6: Enterprise image cache check...");
+    $cachedTreatment = getCachedImageTreatmentEnterprise($imageBase64);
+    if ($cachedTreatment) {
+        error_log("Enterprise image cache hit - returning optimized cached treatment");
+        
+        // Record usage and save to history
+        saveChatHistoryEnterprise($pdo, $deviceHash, "", true, 'image', $imageBase64);
+        saveChatHistoryEnterprise($pdo, $deviceHash, $cachedTreatment, false, 'text', null);
+        recordUsageEnterprise($pdo, $deviceHash, 'image');
+        
+        // SIMPLE response format for Android compatibility
+        echo json_encode([
+            'success' => true,
+            'treatment' => $cachedTreatment
+        ]);
+        exit;
     }
 
-    // STEP 1: COMPREHENSIVE IMAGE VALIDATION
-    error_log("Step 1: Validating image data...");
-    validateImageData($imageBase64);
-    
-    // STEP 2: SECURITY SCANNING
-    error_log("Step 2: Performing security scan...");
-    securityScanImage($imageBase64);
+    // ENTERPRISE PIPELINE - Step 7: User Context Retrieval
+    error_log("STEP 7: Enterprise user context retrieval for personalized image analysis...");
+    $userContext = getUserContextEnterprise($pdo, $deviceHash);
+    error_log("User context for image analysis: experience=" . $userContext['experience_level'] . ", garden=" . $userContext['garden_type']);
 
-    // STEP 3: ANTI-BOT PROTECTION
-    error_log("Step 3: Checking rate limits for image request from device: $deviceHash");
-    checkRateLimits($deviceHash);
-    
-    error_log("Step 4: Checking for suspicious image activity...");
-    detectSuspiciousImageActivity($deviceHash, $imageBase64);
+    // ENTERPRISE PIPELINE - Step 8: S24 Ultra Image Preprocessing
+    error_log("STEP 8: Enterprise S24 Ultra image preprocessing and optimization...");
+    $optimizedImageBase64 = preprocessImageForAnalysisEnterprise($imageBase64, $estimatedSizeMB);
+    error_log("Enterprise image preprocessing completed");
 
-    // STEP 5: DATABASE CONNECTION
-    error_log("Step 5: Attempting database connection for image processing...");
-    $pdo = connectToDatabase();
-    error_log("Database connection successful for image processing");
-    
-    // STEP 6: USAGE LIMITS CHECK
-    error_log("Step 6: Checking image usage limits...");
-    checkUsageLimits($pdo, $deviceHash, 'image');
-
-    // STEP 7: S24 ULTRA IMAGE PREPROCESSING
-    error_log("Step 7: Preprocessing image for optimal analysis...");
-    $optimizedImageBase64 = preprocessImageForAnalysis($imageBase64);
-    error_log("Image preprocessing completed");
-
-    // STEP 8: GOOGLE VISION ANALYSIS
-    error_log("Step 8: Starting Google Vision analysis...");
-    $visionResults = analyzeWithGoogleVision($optimizedImageBase64);
-    error_log("Google Vision analysis completed");
+    // ENTERPRISE PIPELINE - Step 9: Enhanced Google Vision Analysis
+    error_log("STEP 9: Enterprise Google Vision analysis with advanced detection...");
+    $visionResults = analyzeWithGoogleVisionEnterprise($optimizedImageBase64);
+    error_log("Enterprise Google Vision analysis completed");
     error_log("Vision results - Objects: " . count($visionResults['objects']) . ", Labels: " . count($visionResults['labels']));
 
-    // STEP 9: VALIDATE VISION RESULTS
+    // ENTERPRISE PIPELINE - Step 10: Vision Results Validation
     if (empty($visionResults['objects']) && empty($visionResults['labels'])) {
-        error_log("Google Vision found no objects or labels in image");
+        error_log("Enterprise Google Vision found no objects or labels in image");
         throw new Exception('Nu am putut identifica plante în această imagine. Încercați o poză mai clară cu planta în prim-plan.');
     }
 
-    // STEP 10: ENHANCED AI TREATMENT ANALYSIS
-    error_log("Step 10: Getting enhanced treatment recommendations from OpenAI...");
-    $treatment = getTreatmentFromOpenAI($visionResults);
-    error_log("OpenAI treatment response received successfully");
+    // ENTERPRISE PIPELINE - Step 11: Content Analysis for Images
+    error_log("STEP 11: Enterprise image content analysis and classification...");
+    $imageAnalysis = analyzeImageContentEnterprise($visionResults, $userContext);
+    error_log("Enterprise image analysis result: " . json_encode($imageAnalysis));
 
-    // STEP 11: SAVE TO DATABASE
-    error_log("Step 11: Saving image and treatment to chat history...");
-    saveChatHistory($pdo, $deviceHash, "", true, 'image', $imageBase64);
-    saveChatHistory($pdo, $deviceHash, $treatment, false, 'text', null);
+    // ENTERPRISE PIPELINE - Step 12: Enhanced AI Treatment Analysis
+    error_log("STEP 12: Enterprise AI treatment analysis with context awareness...");
+    $treatment = getEnhancedImageTreatmentEnterprise($visionResults, $imageAnalysis, $userContext);
+    error_log("Enterprise AI treatment response generated successfully (length: " . strlen($treatment) . ")");
 
-    // STEP 12: RECORD USAGE
-    error_log("Step 12: Recording image usage...");
-    recordUsage($pdo, $deviceHash, 'image');
+    // ENTERPRISE PIPELINE - Step 13: Treatment Caching
+    error_log("STEP 13: Caching enterprise image treatment...");
+    cacheImageTreatmentEnterprise($imageBase64, $treatment);
 
-    // STEP 13: CLEANUP MEMORY
+    // ENTERPRISE PIPELINE - Step 14: Data Persistence
+    error_log("STEP 14: Enterprise image data persistence...");
+    saveChatHistoryEnterprise($pdo, $deviceHash, "", true, 'image', $imageBase64);
+    saveChatHistoryEnterprise($pdo, $deviceHash, $treatment, false, 'text', null);
+
+    // ENTERPRISE PIPELINE - Step 15: Usage Recording
+    error_log("STEP 15: Enterprise image usage recording...");
+    recordUsageEnterprise($pdo, $deviceHash, 'image');
+
+    // ENTERPRISE PIPELINE - Step 16: Analytics (Async)
+    error_log("STEP 16: Enterprise image analytics tracking...");
+    trackImageEngagementEnterprise($pdo, $deviceHash, $imageAnalysis, $treatment, $visionResults);
+
+    // ENTERPRISE PIPELINE - Step 17: User Context Update
+    error_log("STEP 17: Enterprise user context update with image insights...");
+    updateUserContextWithImageEnterprise($pdo, $deviceHash, $imageAnalysis);
+
+    // ENTERPRISE PIPELINE - Step 18: Memory Cleanup
+    unset($imageBase64, $optimizedImageBase64);
+    if (function_exists('gc_collect_cycles')) {
+        $collected = gc_collect_cycles();
+        error_log("Enterprise image memory cleanup: $collected cycles collected");
+    }
+
+    error_log("Enterprise image processing completed successfully");
+    error_log("Final memory usage: " . memory_get_usage(true) / 1024 / 1024 . " MB");
+    error_log("Total processing time: " . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 2) . "ms");
+    
+    // SIMPLE response format (Android compatible)
+    echo json_encode([
+        'success' => true,
+        'treatment' => $treatment
+    ]);
+
+} catch (Exception $e) {
+    error_log("ENTERPRISE ERROR in process-image.php: " . $e->getMessage());
+    error_log("Error file: " . $e->getFile() . " Line: " . $e->getLine());
+    error_log("Stack trace: " . $e->getTraceAsString());
+    error_log("Memory usage at error: " . memory_get_usage(true) / 1024 / 1024 . " MB");
+    
+    // Enterprise error cleanup
     unset($imageBase64, $optimizedImageBase64);
     if (function_exists('gc_collect_cycles')) {
         gc_collect_cycles();
     }
-
-    error_log("Enhanced image processing completed successfully");
-    error_log("Memory usage after processing: " . memory_get_usage(true) / 1024 / 1024 . " MB");
     
-    echo json_encode([
-        'success' => true,
-        'treatment' => $treatment,
-        'vision_results' => $visionResults,
-        'processing_info' => [
-            'original_size_mb' => $estimatedSizeMB,
-            'objects_found' => count($visionResults['objects']),
-            'labels_found' => count($visionResults['labels'])
-        ]
-    ]);
-
-} catch (Exception $e) {
-    error_log("ERROR in enhanced process-image.php: " . $e->getMessage());
-    error_log("Stack trace: " . $e->getTraceAsString());
-    error_log("Memory usage at error: " . memory_get_usage(true) / 1024 / 1024 . " MB");
-    
-    // Cleanup on error
-    if (function_exists('gc_collect_cycles')) {
-        gc_collect_cycles();
-    }
+    // Enhanced error categorization
+    $errorCategory = categorizeImageErrorEnterprise($e->getMessage());
+    error_log("Enterprise image error category: " . $errorCategory);
     
     http_response_code(400);
     echo json_encode([
@@ -168,10 +207,10 @@ try {
         'error' => $e->getMessage()
     ]);
 }
-// COMPREHENSIVE IMAGE VALIDATION FUNCTION
-function validateImageData($imageBase64) {
+// ENTERPRISE IMAGE VALIDATION FUNCTION with S24 Ultra support
+function validateImageDataEnterprise($imageBase64, $estimatedSizeMB) {
     try {
-        error_log("Starting comprehensive image validation...");
+        error_log("Starting enterprise image validation with S24 Ultra support...");
         
         // Check if base64 string is valid
         if (empty($imageBase64)) {
@@ -186,74 +225,82 @@ function validateImageData($imageBase64) {
         // Validate base64 encoding
         $decodedImage = base64_decode($imageBase64, true);
         if ($decodedImage === false) {
-            error_log("Invalid base64 encoding detected");
-            throw new Exception('Imaginea nu este codificată corect. Încercați din nou.');
+            error_log("Enterprise validation: Invalid base64 encoding detected");
+            throw new Exception('Imaginea nu este codificată corect. Încercați din nou cu o imagine validă.');
         }
         
         // Check decoded image size
         $decodedSize = strlen($decodedImage);
         $decodedSizeMB = round($decodedSize / 1024 / 1024, 2);
-        error_log("Decoded image size: {$decodedSizeMB} MB");
+        error_log("Enterprise validation: Decoded image size: {$decodedSizeMB} MB");
         
-        // S24 ULTRA: Reject extremely large images before they crash the system
-        if ($decodedSizeMB > 80) {
-            error_log("Decoded image too large: {$decodedSizeMB} MB - preventing system crash");
-            throw new Exception("Imaginea este prea mare ({$decodedSizeMB} MB). Samsung S24 Ultra face poze foarte mari. Te rog să comprimi imaginea sau să folosești o setare mai mică în cameră.");
+        // S24 ULTRA: Enterprise-grade size validation
+        if ($decodedSizeMB > 40) {
+            error_log("Enterprise validation: Image too large for processing: {$decodedSizeMB} MB");
+            throw new Exception("Imaginea este prea mare ({$decodedSizeMB} MB). Samsung S24 Ultra face poze foarte mari. Te rog să comprimi imaginea sau să folosești o setare mai mică în cameră (maxim 40 MB).");
         }
         
         // Validate image format using getimagesizefromstring
         $imageInfo = @getimagesizefromstring($decodedImage);
         if ($imageInfo === false) {
-            error_log("Invalid image format detected");
-            throw new Exception('Formatul imaginii nu este valid. Folosiți JPEG, PNG sau WebP.');
+            error_log("Enterprise validation: Invalid image format detected");
+            throw new Exception('Formatul imaginii nu este valid. Folosiți JPEG, PNG sau WebP pentru analiză optimă.');
         }
         
         $width = $imageInfo[0];
         $height = $imageInfo[1];
         $mimeType = $imageInfo['mime'];
         
-        error_log("Image validation - Width: {$width}px, Height: {$height}px, Type: {$mimeType}");
+        error_log("Enterprise validation - Width: {$width}px, Height: {$height}px, Type: {$mimeType}");
         
-        // S24 ULTRA: Check for extremely high resolution images
+        // S24 ULTRA: Enterprise resolution handling
         $megapixels = round(($width * $height) / 1000000, 1);
-        error_log("Image resolution: {$megapixels} MP");
+        error_log("Enterprise validation: Image resolution: {$megapixels} MP");
         
-        if ($megapixels > 150) {
-            error_log("Ultra-high resolution detected: {$megapixels} MP - S24 Ultra compatibility mode");
-            throw new Exception("Imaginea are o rezoluție foarte mare ({$megapixels} MP). Pentru Samsung S24 Ultra, te rog să folosești o setare mai mică în cameră sau să comprimi imaginea.");
+        if ($megapixels > 100) {
+            error_log("Enterprise validation: Ultra-high resolution detected: {$megapixels} MP");
+            // Don't throw exception, just log for enterprise processing
+            error_log("Enterprise mode: Will optimize ultra-high resolution image for processing");
         }
         
         // Validate supported formats
         $supportedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
         if (!in_array($mimeType, $supportedTypes)) {
-            error_log("Unsupported image type: {$mimeType}");
-            throw new Exception('Tipul imaginii nu este suportat. Folosiți JPEG, PNG sau WebP.');
+            error_log("Enterprise validation: Unsupported image type: {$mimeType}");
+            throw new Exception('Tipul imaginii nu este suportat. Folosiți JPEG, PNG sau WebP pentru cea mai bună analiză.');
         }
         
         // Check for minimum size (too small images are usually invalid)
-        if ($width < 50 || $height < 50) {
-            error_log("Image too small: {$width}x{$height}");
-            throw new Exception('Imaginea este prea mică pentru analiză. Minimum 50x50 pixeli.');
+        if ($width < 100 || $height < 100) {
+            error_log("Enterprise validation: Image too small: {$width}x{$height}");
+            throw new Exception('Imaginea este prea mică pentru analiză detaliată. Minimum 100x100 pixeli pentru identificarea plantelor.');
         }
         
-        error_log("Image validation passed successfully");
+        // Enterprise aspect ratio validation
+        $aspectRatio = $width / $height;
+        if ($aspectRatio > 10 || $aspectRatio < 0.1) {
+            error_log("Enterprise validation: Unusual aspect ratio: $aspectRatio");
+            throw new Exception('Imaginea are proporții neobișnuite. Folosiți o imagine cu proporții normale pentru analiză optimă.');
+        }
+        
+        error_log("Enterprise image validation passed successfully");
         return true;
         
     } catch (Exception $e) {
-        error_log("Image validation failed: " . $e->getMessage());
+        error_log("Enterprise image validation failed: " . $e->getMessage());
         throw $e;
     }
 }
 
-// SECURITY SCANNING FUNCTION
-function securityScanImage($imageBase64) {
+// ENTERPRISE IMAGE SECURITY SCANNING FUNCTION
+function performImageSecurityScanEnterprise($imageBase64) {
     try {
-        error_log("Starting security scan of image...");
+        error_log("Starting enterprise image security scan...");
         
         // Decode image for security analysis
         $decodedImage = base64_decode($imageBase64, true);
         
-        // Check for suspicious patterns in binary data
+        // Enterprise security: Check for embedded malicious content
         $suspiciousPatterns = [
             'script',
             'javascript',
@@ -263,18 +310,20 @@ function securityScanImage($imageBase64) {
             '<?php',
             '<%',
             'onload=',
-            'onerror='
+            'onerror=',
+            'document.cookie',
+            'window.location'
         ];
         
         $imageHex = bin2hex($decodedImage);
         foreach ($suspiciousPatterns as $pattern) {
             if (stripos($imageHex, bin2hex($pattern)) !== false) {
-                error_log("Suspicious pattern detected in image: {$pattern}");
-                throw new Exception('Imaginea conține conținut suspect. Pentru siguranță, încercați cu o altă imagine.');
+                error_log("Enterprise security: Malicious pattern detected in image: {$pattern}");
+                throw new Exception('Imaginea conține conținut suspect. Pentru siguranță, încercați cu o altă imagine de plantă.');
             }
         }
         
-        // Check for image bomb patterns (malicious images designed to consume resources)
+        // Enterprise security: Image bomb detection
         $imageInfo = @getimagesizefromstring($decodedImage);
         if ($imageInfo) {
             $width = $imageInfo[0];
@@ -285,40 +334,64 @@ function securityScanImage($imageBase64) {
             $expectedSize = $width * $height * 3; // RGB
             $compressionRatio = $expectedSize / $fileSize;
             
-            // Extremely high compression ratios can indicate image bombs
-            if ($compressionRatio > 1000) {
-                error_log("Suspicious compression ratio detected: {$compressionRatio}");
-                throw new Exception('Imaginea are o structură suspectă. Încercați cu o altă imagine.');
+            // Enterprise threshold for image bombs
+            if ($compressionRatio > 2000) {
+                error_log("Enterprise security: Suspicious compression ratio detected: {$compressionRatio}");
+                throw new Exception('Imaginea are o structură suspectă. Încercați cu o fotografie normală de plantă.');
             }
         }
         
-        // Check for excessive EXIF data (can be used to hide malicious content)
+        // Enterprise security: EXIF data analysis
         if (function_exists('exif_read_data')) {
-            $tempFile = tempnam(sys_get_temp_dir(), 'img_security_');
+            $tempFile = tempnam(sys_get_temp_dir(), 'enterprise_img_security_');
             file_put_contents($tempFile, $decodedImage);
             
             $exifData = @exif_read_data($tempFile);
             unlink($tempFile);
             
-            if ($exifData && count($exifData) > 50) {
-                error_log("Excessive EXIF data detected: " . count($exifData) . " fields");
-                // Don't throw exception, just log - EXIF data is usually harmless
+            if ($exifData && count($exifData) > 100) {
+                error_log("Enterprise security: Excessive EXIF data detected: " . count($exifData) . " fields");
+                // Log but don't block - could be legitimate camera data
+                error_log("Enterprise security: Large EXIF data noted but allowing processing");
             }
         }
         
-        error_log("Security scan passed successfully");
+        // Enterprise security: File signature validation
+        $fileSignature = substr($imageHex, 0, 8);
+        $validSignatures = [
+            'ffd8ffe0', // JPEG
+            'ffd8ffe1', // JPEG
+            'ffd8ffe2', // JPEG
+            '89504e47', // PNG
+            '52494646', // WebP (RIFF)
+        ];
+        
+        $signatureValid = false;
+        foreach ($validSignatures as $signature) {
+            if (stripos($fileSignature, $signature) === 0) {
+                $signatureValid = true;
+                break;
+            }
+        }
+        
+        if (!$signatureValid) {
+            error_log("Enterprise security: Invalid file signature: $fileSignature");
+            throw new Exception('Imaginea nu are o semnătură validă. Folosiți o imagine autentică de plantă.');
+        }
+        
+        error_log("Enterprise image security scan passed successfully");
         return true;
         
     } catch (Exception $e) {
-        error_log("Security scan failed: " . $e->getMessage());
+        error_log("Enterprise image security scan failed: " . $e->getMessage());
         throw $e;
     }
 }
 
-// S24 ULTRA PREPROCESSING FUNCTION
-function preprocessImageForAnalysis($imageBase64) {
+// ENTERPRISE S24 ULTRA IMAGE PREPROCESSING FUNCTION
+function preprocessImageForAnalysisEnterprise($imageBase64, $estimatedSizeMB) {
     try {
-        error_log("Starting S24 Ultra image preprocessing...");
+        error_log("Starting enterprise S24 Ultra image preprocessing...");
         
         // Decode the image
         $decodedImage = base64_decode($imageBase64, true);
@@ -328,7 +401,7 @@ function preprocessImageForAnalysis($imageBase64) {
         $originalHeight = $imageInfo[1];
         $mimeType = $imageInfo['mime'];
         
-        error_log("Original image: {$originalWidth}x{$originalHeight}, Type: {$mimeType}");
+        error_log("Enterprise preprocessing: Original {$originalWidth}x{$originalHeight}, Type: {$mimeType}, Size: {$estimatedSizeMB}MB");
         
         // Create image resource based on type
         switch ($mimeType) {
@@ -343,17 +416,17 @@ function preprocessImageForAnalysis($imageBase64) {
                 $sourceImage = @imagecreatefromstring($decodedImage);
                 break;
             default:
-                throw new Exception('Tip de imagine nesuportat pentru procesare');
+                throw new Exception('Tip de imagine nesuportat pentru procesare enterprise');
         }
         
         if (!$sourceImage) {
-            error_log("Failed to create image resource from decoded data");
-            throw new Exception('Nu am putut procesa imaginea. Încercați cu o altă imagine.');
+            error_log("Enterprise preprocessing: Failed to create image resource");
+            throw new Exception('Nu am putut procesa imaginea pentru analiză. Încercați cu o altă imagine.');
         }
         
-        // S24 ULTRA: Aggressive resizing for ultra-high resolution images
-        $maxDimension = 1200; // Increased from 800 for better quality
-        $maxFileSize = 800 * 1024; // 800KB target
+        // Enterprise S24 ULTRA: Intelligent resizing based on content
+        $maxDimension = 1600; // Enterprise quality - higher than basic
+        $maxFileSize = 1024 * 1024; // 1MB target for optimal processing
         
         // Calculate optimal dimensions
         $scale = min(
@@ -365,12 +438,12 @@ function preprocessImageForAnalysis($imageBase64) {
         $newWidth = round($originalWidth * $scale);
         $newHeight = round($originalHeight * $scale);
         
-        error_log("Resizing to: {$newWidth}x{$newHeight} (scale: {$scale})");
+        error_log("Enterprise preprocessing: Resizing to {$newWidth}x{$newHeight} (scale: {$scale})");
         
         // Create new image with optimal dimensions
         $resizedImage = imagecreatetruecolor($newWidth, $newHeight);
         
-        // Preserve transparency for PNG
+        // Enterprise quality: Preserve transparency for PNG
         if ($mimeType === 'image/png') {
             imagealphablending($resizedImage, false);
             imagesavealpha($resizedImage, true);
@@ -378,7 +451,7 @@ function preprocessImageForAnalysis($imageBase64) {
             imagefill($resizedImage, 0, 0, $transparent);
         }
         
-        // High-quality resampling
+        // Enterprise quality: High-quality resampling
         imagecopyresampled(
             $resizedImage, $sourceImage,
             0, 0, 0, 0,
@@ -386,28 +459,27 @@ function preprocessImageForAnalysis($imageBase64) {
             $originalWidth, $originalHeight
         );
         
-        // Apply image enhancement for better plant recognition
+        // Enterprise enhancement: Apply image filters for better plant recognition
         if (function_exists('imagefilter')) {
             // Enhance contrast for better plant detection
-            imagefilter($resizedImage, IMG_FILTER_CONTRAST, -10);
-            // Slightly increase brightness
-            imagefilter($resizedImage, IMG_FILTER_BRIGHTNESS, 5);
-            // Sharpen for better detail recognition
-            imagefilter($resizedImage, IMG_FILTER_EDGEDETECT);
-            imagefilter($resizedImage, IMG_FILTER_CONTRAST, -20);
+            imagefilter($resizedImage, IMG_FILTER_CONTRAST, -15);
+            // Slightly increase brightness for better visibility
+            imagefilter($resizedImage, IMG_FILTER_BRIGHTNESS, 10);
+            // Reduce noise for cleaner analysis
+            imagefilter($resizedImage, IMG_FILTER_SMOOTH, 2);
         }
         
-        // Convert back to base64 with optimal quality
+        // Enterprise optimization: Convert to optimal format with quality control
         ob_start();
         
         // Try different quality levels to meet size target
-        $quality = 85;
+        $quality = 90; // Start with high quality for enterprise
         do {
             ob_clean();
             imagejpeg($resizedImage, null, $quality);
             $outputSize = ob_get_length();
             $quality -= 5;
-        } while ($outputSize > $maxFileSize && $quality > 30);
+        } while ($outputSize > $maxFileSize && $quality > 60); // Maintain minimum quality
         
         $optimizedImageData = ob_get_contents();
         ob_end_clean();
@@ -418,63 +490,231 @@ function preprocessImageForAnalysis($imageBase64) {
         
         $finalSize = strlen($optimizedImageData);
         $finalSizeKB = round($finalSize / 1024, 2);
+        $compressionRatio = round((strlen($decodedImage) / $finalSize) * 100, 1);
         
-        error_log("Image preprocessing completed: {$finalSizeKB} KB (quality: " . ($quality + 5) . ")");
+        error_log("Enterprise preprocessing completed: {$finalSizeKB} KB (quality: " . ($quality + 5) . ", compression: {$compressionRatio}%)");
         
         return base64_encode($optimizedImageData);
         
     } catch (Exception $e) {
-        error_log("Image preprocessing failed: " . $e->getMessage());
-        // If preprocessing fails, return original (but this might cause issues with large images)
-        error_log("Falling back to original image");
+        error_log("Enterprise image preprocessing failed: " . $e->getMessage());
+        // Enterprise fallback: Return original if preprocessing fails
+        error_log("Enterprise fallback: Using original image");
         return $imageBase64;
     }
 }
-// ENHANCED GOOGLE VISION FUNCTION with S24 Ultra optimization
-function analyzeWithGoogleVision($imageBase64) {
+
+// ENTERPRISE IMAGE CONTENT ANALYSIS FUNCTION
+function analyzeImageContentEnterprise($visionResults, $userContext) {
+    try {
+        error_log("Starting enterprise image content analysis...");
+        
+        $analysis = [
+            'plant_type' => 'unknown',
+            'confidence' => 0.0,
+            'health_status' => 'unknown',
+            'problems_detected' => [],
+            'season_relevant' => false,
+            'user_relevant' => false,
+            'complexity_level' => 'basic',
+            'romanian_context' => false
+        ];
+        
+        // Analyze detected objects and labels
+        $allDetections = array_merge(
+            array_column($visionResults['objects'], 'name'),
+            array_column($visionResults['labels'], 'description')
+        );
+        
+        error_log("Enterprise analysis: Processing " . count($allDetections) . " detections");
+        
+        // Plant type detection with Romanian context
+        $plantTypes = [
+            'tomato' => ['tomate', 'rosii', 'tomato'],
+            'cucumber' => ['castraveti', 'castravet', 'cucumber'],
+            'pepper' => ['ardei', 'paprika', 'pepper'],
+            'eggplant' => ['vinete', 'patlagele', 'eggplant'],
+            'lettuce' => ['salata', 'laitue', 'lettuce'],
+            'onion' => ['ceapa', 'onion'],
+            'garlic' => ['usturoi', 'garlic'],
+            'carrot' => ['morcov', 'carrot'],
+            'radish' => ['ridichi', 'radish'],
+            'spinach' => ['spanac', 'spinach'],
+            'parsley' => ['patrunjel', 'parsley'],
+            'dill' => ['marar', 'dill'],
+            'basil' => ['busuioc', 'basil'],
+            'rosemary' => ['rozmarinul', 'rosemary'],
+            'roses' => ['trandafiri', 'roses'],
+            'tulips' => ['lalele', 'tulips']
+        ];
+        
+        foreach ($plantTypes as $type => $keywords) {
+            foreach ($allDetections as $detection) {
+                foreach ($keywords as $keyword) {
+                    if (stripos($detection, $keyword) !== false) {
+                        $analysis['plant_type'] = $type;
+                        $analysis['confidence'] += 0.3;
+                        $analysis['romanian_context'] = true;
+                        break 3;
+                    }
+                }
+            }
+        }
+        
+        // Health status detection
+        $healthIndicators = [
+            'healthy' => ['green', 'fresh', 'vibrant', 'lush'],
+            'stressed' => ['yellow', 'wilted', 'dry', 'brown'],
+            'diseased' => ['spotted', 'moldy', 'fungus', 'pest'],
+            'dying' => ['dead', 'withered', 'black', 'rotten']
+        ];
+        
+        foreach ($healthIndicators as $status => $indicators) {
+            foreach ($allDetections as $detection) {
+                foreach ($indicators as $indicator) {
+                    if (stripos($detection, $indicator) !== false) {
+                        $analysis['health_status'] = $status;
+                        $analysis['confidence'] += 0.2;
+                        break 3;
+                    }
+                }
+            }
+        }
+        
+        // Problem detection
+        $problemTypes = [
+            'pest' => ['insect', 'bug', 'aphid', 'caterpillar'],
+            'disease' => ['spot', 'mold', 'fungus', 'blight'],
+            'nutrient' => ['yellow', 'pale', 'deficiency'],
+            'water' => ['wilted', 'dry', 'overwatered']
+        ];
+        
+        foreach ($problemTypes as $problem => $indicators) {
+            foreach ($allDetections as $detection) {
+                foreach ($indicators as $indicator) {
+                    if (stripos($detection, $indicator) !== false) {
+                        $analysis['problems_detected'][] = $problem;
+                        $analysis['confidence'] += 0.1;
+                    }
+                }
+            }
+        }
+        
+        // User relevance check
+        if (!empty($userContext['favorite_plants'])) {
+            foreach ($userContext['favorite_plants'] as $favPlant) {
+                if ($analysis['plant_type'] === $favPlant || 
+                    in_array($favPlant, $allDetections)) {
+                    $analysis['user_relevant'] = true;
+                    $analysis['confidence'] += 0.2;
+                    break;
+                }
+            }
+        }
+        
+        // Complexity level based on user experience
+        $analysis['complexity_level'] = match($userContext['experience_level']) {
+            'avansat' => 'advanced',
+            'intermediar' => 'intermediate',
+            default => 'basic'
+        };
+        
+        // Seasonal relevance
+        $currentMonth = date('n');
+        $analysis['season_relevant'] = true; // Images are always season-relevant
+        
+        // Final confidence adjustment
+        $analysis['confidence'] = min(1.0, $analysis['confidence']);
+        
+        error_log("Enterprise image content analysis completed: " . json_encode($analysis));
+        return $analysis;
+        
+    } catch (Exception $e) {
+        error_log("Enterprise image content analysis failed: " . $e->getMessage());
+        return [
+            'plant_type' => 'unknown',
+            'confidence' => 0.3,
+            'health_status' => 'unknown',
+            'problems_detected' => [],
+            'season_relevant' => false,
+            'user_relevant' => false,
+            'complexity_level' => 'basic',
+            'romanian_context' => false
+        ];
+    }
+}
+
+// ENTERPRISE ERROR CATEGORIZATION FOR IMAGES
+function categorizeImageErrorEnterprise($errorMessage) {
+    $lowerError = strtolower($errorMessage);
+    
+    if (strpos($lowerError, 's24 ultra') !== false || strpos($lowerError, 'prea mare') !== false) {
+        return 'image_size_error';
+    } elseif (strpos($lowerError, 'format') !== false || strpos($lowerError, 'invalid') !== false) {
+        return 'image_format_error';
+    } elseif (strpos($lowerError, 'suspect') !== false || strpos($lowerError, 'security') !== false) {
+        return 'image_security_error';
+    } elseif (strpos($lowerError, 'vision') !== false || strpos($lowerError, 'google') !== false) {
+        return 'vision_api_error';
+    } elseif (strpos($lowerError, 'openai') !== false || strpos($lowerError, 'ai') !== false) {
+        return 'ai_processing_error';
+    } elseif (strpos($lowerError, 'memory') !== false || strpos($lowerError, 'timeout') !== false) {
+        return 'resource_error';
+    } else {
+        return 'general_image_error';
+    }
+}
+// ENTERPRISE GOOGLE VISION FUNCTION with advanced detection
+function analyzeWithGoogleVisionEnterprise($imageBase64) {
     $googleVisionKey = getenv('GOOGLE_VISION_KEY');
     if (!$googleVisionKey) {
-        error_log("Google Vision API key not found in environment variables");
+        error_log("Google Vision API key not found for enterprise image processing");
         throw new Exception('Serviciul de analiză imagini nu este disponibil momentan');
     }
 
-    error_log("Starting enhanced Google Vision analysis...");
+    error_log("Starting enterprise Google Vision analysis...");
     error_log("Google Vision API key exists: YES (length: " . strlen($googleVisionKey) . ")");
     error_log("Image base64 length for Vision API: " . strlen($imageBase64));
 
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . $googleVisionKey;
 
-    // ENHANCED: Multiple detection types for comprehensive plant analysis
+    // ENTERPRISE: Comprehensive detection types for professional plant analysis
     $requestData = [
         'requests' => [[
             'image' => ['content' => $imageBase64],
             'features' => [
-                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 20],
-                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
-                ['type' => 'TEXT_DETECTION', 'maxResults' => 10], // For plant labels/signs
-                ['type' => 'CROP_HINTS', 'maxResults' => 5], // For better framing
-                ['type' => 'IMAGE_PROPERTIES'] // For color analysis
+                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 30],     // More objects
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 30],         // More labels
+                ['type' => 'TEXT_DETECTION', 'maxResults' => 15],          // Plant labels/signs
+                ['type' => 'CROP_HINTS', 'maxResults' => 10],              // Better framing
+                ['type' => 'IMAGE_PROPERTIES'],                            // Color analysis
+                ['type' => 'SAFE_SEARCH_DETECTION'],                       // Content safety
+                ['type' => 'WEB_DETECTION', 'maxResults' => 10]            // Similar images
             ],
             'imageContext' => [
                 'cropHintsParams' => [
-                    'aspectRatios' => [1.0, 1.77, 0.56] // Common aspect ratios
+                    'aspectRatios' => [1.0, 1.77, 0.56, 0.75, 1.33] // Multiple aspect ratios
                 ],
-                'languageHints' => ['ro', 'en'] // Romanian and English
+                'languageHints' => ['ro', 'en', 'la'],                     // Romanian, English, Latin
+                'latLongRect' => [                                          // Romanian geographic context
+                    'minLatLng' => ['latitude' => 43.6, 'longitude' => 20.2],
+                    'maxLatLng' => ['latitude' => 48.3, 'longitude' => 29.7]
+                ]
             ]
         ]]
     ];
 
-    error_log("Sending enhanced request to Google Vision API...");
+    error_log("Sending enterprise request to Google Vision API...");
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Content-Type: application/json',
-        'User-Agent: GospodApp/1.0 (Romanian Gardening Assistant)'
+        'User-Agent: GospodApp-Enterprise/2.0 (Romanian Gardening Assistant)'
     ]);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 60); // Increased timeout for large images
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 45); // Increased timeout for comprehensive analysis
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
 
     $response = curl_exec($ch);
@@ -482,19 +722,19 @@ function analyzeWithGoogleVision($imageBase64) {
     $curlError = curl_error($ch);
     
     // Enhanced error logging
-    error_log("Google Vision response code: $httpCode");
+    error_log("Google Vision enterprise response code: $httpCode");
     if ($httpCode !== 200) {
-        error_log("Google Vision error response: " . substr($response, 0, 1000));
+        error_log("Google Vision enterprise error response: " . substr($response, 0, 1000));
         if ($curlError) {
-            error_log("cURL error for Google Vision: " . $curlError);
+            error_log("cURL error for Google Vision enterprise: " . $curlError);
         }
     } else {
-        error_log("Google Vision response received successfully (length: " . strlen($response) . ")");
+        error_log("Google Vision enterprise response received successfully (length: " . strlen($response) . ")");
     }
     
     curl_close($ch);
 
-    // Handle different error scenarios
+    // Enterprise error handling
     if ($curlError) {
         throw new Exception('Eroare de conexiune la serviciul de analiză imagini. Verificați conexiunea la internet.');
     }
@@ -514,7 +754,7 @@ function analyzeWithGoogleVision($imageBase64) {
     $result = json_decode($response, true);
 
     if (isset($result['error'])) {
-        error_log("Google Vision API error: " . json_encode($result['error']));
+        error_log("Google Vision enterprise API error: " . json_encode($result['error']));
         $errorMessage = $result['error']['message'] ?? 'Eroare necunoscută';
         
         if (strpos($errorMessage, 'quota') !== false) {
@@ -524,50 +764,59 @@ function analyzeWithGoogleVision($imageBase64) {
         throw new Exception('Eroare la analiza imaginii: ' . $errorMessage);
     }
 
-    // ENHANCED: Extract comprehensive data
+    // ENTERPRISE: Extract comprehensive data with advanced processing
     $objects = [];
     $labels = [];
     $texts = [];
     $colors = [];
     $cropHints = [];
+    $webDetection = [];
+    $safeSearch = [];
 
     $responseData = $result['responses'][0] ?? [];
 
-    // Extract objects
+    // Extract objects with confidence scoring
     if (isset($responseData['localizedObjectAnnotations'])) {
         foreach ($responseData['localizedObjectAnnotations'] as $obj) {
             $objects[] = [
                 'name' => $obj['name'],
                 'score' => $obj['score'] ?? 0,
-                'boundingBox' => $obj['boundingPoly'] ?? null
+                'boundingBox' => $obj['boundingPoly'] ?? null,
+                'mid' => $obj['mid'] ?? null
             ];
         }
-        error_log("Google Vision found " . count($objects) . " objects: " . implode(', ', array_column($objects, 'name')));
+        error_log("Google Vision enterprise found " . count($objects) . " objects: " . implode(', ', array_column($objects, 'name')));
     }
 
-    // Extract labels
+    // Extract labels with enhanced metadata
     if (isset($responseData['labelAnnotations'])) {
         foreach ($responseData['labelAnnotations'] as $label) {
             $labels[] = [
                 'description' => $label['description'],
                 'score' => $label['score'] ?? 0,
-                'confidence' => $label['confidence'] ?? 0
+                'confidence' => $label['confidence'] ?? 0,
+                'mid' => $label['mid'] ?? null,
+                'topicality' => $label['topicality'] ?? 0
             ];
         }
-        error_log("Google Vision found " . count($labels) . " labels: " . implode(', ', array_column($labels, 'description')));
+        error_log("Google Vision enterprise found " . count($labels) . " labels: " . implode(', ', array_column($labels, 'description')));
     }
 
-    // Extract text (useful for plant labels, garden signs)
+    // Extract text with language detection
     if (isset($responseData['textAnnotations'])) {
         foreach ($responseData['textAnnotations'] as $text) {
-            if (strlen($text['description']) > 2) { // Filter out single characters
-                $texts[] = $text['description'];
+            if (strlen($text['description']) > 2) {
+                $texts[] = [
+                    'text' => $text['description'],
+                    'boundingBox' => $text['boundingPoly'] ?? null,
+                    'confidence' => $text['confidence'] ?? 0
+                ];
             }
         }
-        error_log("Google Vision found " . count($texts) . " text elements");
+        error_log("Google Vision enterprise found " . count($texts) . " text elements");
     }
 
-    // Extract dominant colors
+    // Extract dominant colors with advanced analysis
     if (isset($responseData['imagePropertiesAnnotation']['dominantColors']['colors'])) {
         foreach ($responseData['imagePropertiesAnnotation']['dominantColors']['colors'] as $colorInfo) {
             $color = $colorInfo['color'];
@@ -575,50 +824,78 @@ function analyzeWithGoogleVision($imageBase64) {
                 'red' => $color['red'] ?? 0,
                 'green' => $color['green'] ?? 0,
                 'blue' => $color['blue'] ?? 0,
-                'score' => $colorInfo['score'] ?? 0
+                'alpha' => $color['alpha'] ?? 1.0,
+                'score' => $colorInfo['score'] ?? 0,
+                'pixelFraction' => $colorInfo['pixelFraction'] ?? 0
             ];
         }
-        error_log("Google Vision found " . count($colors) . " dominant colors");
+        error_log("Google Vision enterprise found " . count($colors) . " dominant colors");
     }
 
-    // Extract crop hints
+    // Extract crop hints for better composition
     if (isset($responseData['cropHintsAnnotation']['cropHints'])) {
         foreach ($responseData['cropHintsAnnotation']['cropHints'] as $hint) {
-            $cropHints[] = $hint['boundingPoly'] ?? null;
+            $cropHints[] = [
+                'boundingPoly' => $hint['boundingPoly'] ?? null,
+                'confidence' => $hint['confidence'] ?? 0,
+                'importanceFraction' => $hint['importanceFraction'] ?? 0
+            ];
         }
-        error_log("Google Vision found " . count($cropHints) . " crop hints");
+        error_log("Google Vision enterprise found " . count($cropHints) . " crop hints");
     }
 
-    error_log("Enhanced Google Vision analysis completed successfully");
+    // Extract web detection for similar plants
+    if (isset($responseData['webDetection'])) {
+        $webData = $responseData['webDetection'];
+        $webDetection = [
+            'webEntities' => $webData['webEntities'] ?? [],
+            'fullMatchingImages' => $webData['fullMatchingImages'] ?? [],
+            'partialMatchingImages' => $webData['partialMatchingImages'] ?? [],
+            'pagesWithMatchingImages' => $webData['pagesWithMatchingImages'] ?? []
+        ];
+        error_log("Google Vision enterprise web detection completed");
+    }
+
+    // Extract safe search results
+    if (isset($responseData['safeSearchAnnotation'])) {
+        $safeSearch = $responseData['safeSearchAnnotation'];
+        error_log("Google Vision enterprise safe search completed");
+    }
+
+    error_log("Enhanced Google Vision enterprise analysis completed successfully");
 
     return [
         'objects' => $objects,
         'labels' => $labels,
         'texts' => $texts,
         'colors' => $colors,
-        'cropHints' => $cropHints
+        'cropHints' => $cropHints,
+        'webDetection' => $webDetection,
+        'safeSearch' => $safeSearch
     ];
 }
 
-// ENHANCED OPENAI TREATMENT FUNCTION with comprehensive plant analysis
-function getTreatmentFromOpenAI($visionResults) {
+// ENTERPRISE AI TREATMENT FUNCTION with comprehensive plant analysis
+function getEnhancedImageTreatmentEnterprise($visionResults, $imageAnalysis, $userContext) {
     $openaiKey = getenv('OPENAI_API_KEY');
     if (!$openaiKey) {
-        error_log("OpenAI API key not found in environment variables for image analysis");
-        throw new Exception('Serviciul de analiză nu este disponibil momentan');
+        error_log("OpenAI API key not found for enterprise image analysis");
+        throw new Exception('Serviciul de analiză AI nu este disponibil momentan');
     }
 
     // Prepare comprehensive data for analysis
     $objects = array_column($visionResults['objects'], 'name');
     $labels = array_column($visionResults['labels'], 'description');
-    $texts = $visionResults['texts'];
+    $texts = array_column($visionResults['texts'], 'text');
     $colors = $visionResults['colors'];
 
-    error_log("Creating enhanced OpenAI prompt for comprehensive plant analysis...");
+    error_log("Creating enterprise OpenAI prompt for comprehensive plant analysis...");
     error_log("Objects for analysis: " . implode(', ', $objects));
     error_log("Labels for analysis: " . implode(', ', $labels));
     error_log("Text elements found: " . count($texts));
     error_log("Color palette size: " . count($colors));
+    error_log("Plant type detected: " . $imageAnalysis['plant_type']);
+    error_log("Health status: " . $imageAnalysis['health_status']);
 
     // Analyze dominant colors for plant health
     $colorAnalysis = "";
@@ -634,61 +911,94 @@ function getTreatmentFromOpenAI($visionResults) {
             $colorAnalysis .= "Posibile semne de stres sau boală (culori roșiatice). ";
         } elseif ($greenLevel > 150) {
             $colorAnalysis .= "Planta pare sănătoasă (verde intens). ";
+        } elseif ($greenLevel < 80) {
+            $colorAnalysis .= "Posibile probleme de nutriție (verde slab). ";
         }
     }
 
-    $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență, specializat în diagnosticarea plantelor prin imagini.
+    // Get current season context
+    $currentMonth = date('n');
+    $currentSeason = getSeasonEnterprise($currentMonth);
+    $seasonalContext = getSeasonalContextEnterprise($currentSeason, $currentMonth);
 
-EXPERTIZA TA AVANSATĂ:
-- Identifici specii de plante românești și internaționale
-- Diagnostichezi boli, dăunători și deficiențe nutriționale
-- Analizezi sănătatea plantelor prin culoare, formă și aspect
-- Cunoști tratamentele disponibile în România
+    $systemPrompt = "Ești un expert în grădinărit din România cu 30 de ani experiență, specializat în diagnosticarea plantelor prin imagini de înaltă calitate.
+
+CONTEXTUL UTILIZATORULUI:
+- Nivel experiență: {$userContext['experience_level']}
+- Tip grădină: {$userContext['garden_type']}
+- Regiunea: {$userContext['region']}
+- Plante preferate: " . implode(', ', $userContext['favorite_plants']) . "
+
+CONTEXTUL SEZONULUI ACTUAL:
+- Sezonul: $currentSeason (luna " . date('F') . ")
+- Activități de sezon: {$seasonalContext['activities']}
+- Plante specifice: {$seasonalContext['plants']}
+- Probleme comune: {$seasonalContext['common_issues']}
+
+ANALIZA IMAGINII DETECTATE:
+- Tip plantă identificat: {$imageAnalysis['plant_type']}
+- Starea de sănătate: {$imageAnalysis['health_status']}
+- Probleme detectate: " . implode(', ', $imageAnalysis['problems_detected']) . "
+- Încrederea analizei: " . round($imageAnalysis['confidence'] * 100) . "%
+- Context românesc: " . ($imageAnalysis['romanian_context'] ? 'DA' : 'NU') . "
+
+EXPERTIZA TA AVANSATĂ PENTRU IMAGINI:
+- Analizezi toate datele: obiecte, etichete, text și culori
+- Identifici specii exacte de plante românești și internaționale
+- Diagnostichezi boli, dăunători și deficiențe prin aspectul vizual
+- Evaluezi sănătatea plantelor prin culoare, formă și aspect general
+- Cunoști tratamentele și produsele disponibile în România
 - Înțelegi specificul climei continentale românești
 
 REGULI PENTRU ANALIZA IMAGINILOR:
-- Analizezi toate datele: obiecte, etichete, text și culori
-- Identifici tipul exact de plantă dacă este posibil
-- Evaluezi starea de sănătate și problemele vizibile
-- Dai sfaturi concrete și practice pentru clima României
+- Adaptezi răspunsul la nivelul utilizatorului și contextul sezonier
+- Incluzi recomandări concrete pentru clima României
 - Menționezi produse și tratamente disponibile local
 - Explici când și cum să aplici tratamentele
-- Folosești termeni simpli, fără formatare specială
-- Răspunsurile să fie între 200-500 de cuvinte, detaliate și utile
+- Folosești termeni simpli pentru începători, detalii tehnice pentru avansați
+- Răspunsurile să fie între 200-400 de cuvinte, detaliate și utile
+- Eviți asteriscuri, numere în paranteză sau formatare specială
 
 STRUCTURA RĂSPUNSULUI:
-1. Identificarea plantei
-2. Evaluarea stării de sănătate
-3. Probleme identificate (dacă există)
-4. Tratamente și soluții concrete
-5. Sfaturi de îngrijire pe termen lung";
+1. Identificarea precisă a plantei
+2. Evaluarea stării de sănătate bazată pe aspectul vizual
+3. Probleme identificate (dacă există) și cauzele lor
+4. Tratamente și soluții concrete disponibile în România
+5. Sfaturi de îngrijire pe termen lung și prevenire
+6. Recomandări sezoniere specifice";
 
     // Create comprehensive prompt with all available data
-    $prompt = "Analizează această imagine de grădină folosind toate datele disponibile:
+    $prompt = "Analizează această imagine de grădină folosind toate datele disponibile din analiza avansată:
 
 OBIECTE DETECTATE: " . implode(', ', $objects) . "
 ETICHETE IDENTIFICATE: " . implode(', ', $labels) . "
 TEXT GĂSIT ÎN IMAGINE: " . implode(', ', $texts) . "
 ANALIZA CULORILOR: " . $colorAnalysis . "
 
-Te rog să îmi oferi o analiză completă:
-1. Ce tip de plantă/plante vezi și cum le identifici
-2. Evaluarea stării de sănătate bazată pe culori și aspect
-3. Probleme vizibile (boli, dăunători, deficiențe)
-4. Tratamente concrete disponibile în România
-5. Sfaturi de îngrijire pentru clima noastră
+CONTEXT SUPLIMENTAR:
+- Planta identificată automat: {$imageAnalysis['plant_type']}
+- Starea detectată: {$imageAnalysis['health_status']}
+- Relevanță pentru utilizator: " . ($imageAnalysis['user_relevant'] ? 'DA (plantă cunoscută)' : 'NU') . "
+
+Te rog să îmi oferi o analiză completă și personalizată:
+1. Identificarea exactă a plantei și cum ai ajuns la această concluzie
+2. Evaluarea stării de sănătate bazată pe culori, formă și aspectul general
+3. Probleme vizibile (boli, dăunători, deficiențe) și cum le-ai identificat
+4. Tratamente concrete și produse disponibile în România
+5. Sfaturi de îngrijire adaptate pentru clima noastră și sezonul actual
 6. Când și cum să aplici tratamentele recomandate
+7. Măsuri de prevenire pentru viitor
 
-Dacă ai identificat text în imagine (etichete, semne), folosește aceste informații pentru o analiză mai precisă.";
+Dacă ai identificat text în imagine (etichete, semne), folosește aceste informații pentru o analiză și mai precisă.";
 
-    error_log("Sending enhanced request to OpenAI for comprehensive plant analysis...");
+    error_log("Sending enterprise request to OpenAI for comprehensive plant analysis...");
 
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Content-Type: application/json',
         'Authorization: Bearer ' . $openaiKey,
-        'User-Agent: GospodApp/1.0 (Romanian Gardening Assistant)'
+        'User-Agent: GospodApp-Enterprise/2.0 (Romanian Gardening Assistant)'
     ]);
 
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
@@ -697,41 +1007,36 @@ Dacă ai identificat text în imagine (etichete, semne), folosește aceste infor
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $prompt]
         ],
-        'max_tokens' => 1500, // Increased for comprehensive analysis
-        'temperature' => 0.7,
+        'max_tokens' => 800, // Increased for comprehensive analysis
+        'temperature' => $imageAnalysis['health_status'] === 'diseased' ? 0.3 : 0.7, // Lower temp for medical issues
         'top_p' => 0.9
     ]));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 60); // Increased timeout
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 45);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
 
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
     
-    // Enhanced error logging
-    error_log("OpenAI enhanced analysis response code: $httpCode");
+    error_log("OpenAI enterprise image analysis response code: $httpCode");
     if ($httpCode !== 200) {
-        error_log("OpenAI enhanced analysis error response: " . substr($response, 0, 1000));
+        error_log("OpenAI enterprise image analysis error: " . substr($response, 0, 1000));
         if ($curlError) {
-            error_log("cURL error for OpenAI enhanced analysis: " . $curlError);
+            error_log("cURL error for OpenAI enterprise image analysis: " . $curlError);
         }
     } else {
-        error_log("OpenAI enhanced analysis response received successfully (length: " . strlen($response) . ")");
+        error_log("OpenAI enterprise image analysis response received (length: " . strlen($response) . ")");
     }
     
     curl_close($ch);
 
-    // Handle different error scenarios
+    // Enhanced error handling
     if ($curlError) {
-        throw new Exception('Eroare de conexiune la serviciul de analiză AI. Verificați conexiunea la internet.');
+        throw new Exception('Eroare de conexiune la serviciul de analiză AI. Verificați conexiunea la internet și încercați din nou.');
     }
 
     if ($httpCode === 429) {
         throw new Exception('Serviciul de analiză AI este temporar suprasolicitat. Încercați din nou în câteva minute.');
-    }
-
-    if ($httpCode === 401) {
-        throw new Exception('Serviciul de analiză AI are probleme de autentificare. Încercați din nou mai târziu.');
     }
 
     if ($httpCode !== 200) {
@@ -741,236 +1046,131 @@ Dacă ai identificat text în imagine (etichete, semne), folosește aceste infor
     $data = json_decode($response, true);
 
     if (isset($data['error'])) {
-        error_log("OpenAI enhanced analysis API error: " . json_encode($data['error']));
-        $errorType = $data['error']['type'] ?? 'unknown';
-        
-        if ($errorType === 'insufficient_quota') {
-            throw new Exception('Serviciul de analiză AI a atins limita zilnică. Încercați mâine.');
-        }
-        
+        error_log("OpenAI enterprise image analysis API error: " . json_encode($data['error']));
         throw new Exception('Nu am putut analiza imaginea momentan. Încercați din nou.');
     }
 
     if (!isset($data['choices'][0]['message']['content'])) {
-        error_log("OpenAI enhanced analysis response missing content: " . json_encode($data));
+        error_log("OpenAI enterprise image analysis response missing content");
         throw new Exception('Analiza imaginii a eșuat. Încercați cu o altă poză.');
     }
 
     $content = $data['choices'][0]['message']['content'];
-    error_log("OpenAI enhanced analysis content length: " . strlen($content));
+    error_log("OpenAI enterprise image analysis content length: " . strlen($content));
     
-    return cleanForTTS($content);
-}
-// ENHANCED DATABASE CONNECTION with detailed error logging for image processing
-function connectToDatabase() {
-    try {
-        $host = getenv('DB_HOST');
-        $dbname = getenv('DB_NAME');
-        $username = getenv('DB_USER');
-        $password = getenv('DB_PASS');
-        
-        // DEBUG: Log database connection attempt (without password)
-        error_log("Image processing - Attempting DB connection to: $host");
-        error_log("Image processing - Database name: $dbname");
-        error_log("Image processing - Username: $username");
-        error_log("Image processing - Password exists: " . (getenv('DB_PASS') ? 'YES' : 'NO'));
-        
-        $dsn = "mysql:host=$host;dbname=$dbname;charset=utf8mb4";
-        $pdo = new PDO($dsn, $username, $password, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_TIMEOUT => 15, // Increased timeout for image processing
-            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
-        ]);
-        
-        error_log("Image processing - Database connection successful");
-        return $pdo;
-        
-    } catch (PDOException $e) {
-        error_log("Image processing - Database connection failed: " . $e->getMessage());
-        error_log("Image processing - PDO Error Code: " . $e->getCode());
-        throw new Exception('Nu pot conecta la baza de date momentan. Încercați din nou.');
-    }
+    return cleanForTTSEnterprise($content);
 }
 
-// ENHANCED USAGE LIMITS CHECK for image processing
-function checkUsageLimits($pdo, $deviceHash, $type) {
+// ENTERPRISE IMAGE CACHING FUNCTIONS
+function getCachedImageTreatmentEnterprise($imageBase64) {
     try {
-        $today = date('Y-m-d');
-        error_log("Image processing - Checking usage limits for device: $deviceHash on date: $today");
+        $imageHash = md5($imageBase64);
+        $cacheKey = 'enterprise_img_' . $imageHash;
+        $cacheFile = '/tmp/' . $cacheKey . '.json';
         
-        $stmt = $pdo->prepare("
-            SELECT text_count, image_count, premium, extra_questions 
-            FROM usage_tracking 
-            WHERE device_hash = ? AND date = ?
-        ");
-        $stmt->execute([$deviceHash, $today]);
-        $usage = $stmt->fetch();
-
-        if (!$usage) {
-            error_log("Image processing - No usage record found, creating new entry for device: $deviceHash");
-            $stmt = $pdo->prepare("
-                INSERT INTO usage_tracking (device_hash, date, text_count, image_count, premium, extra_questions) 
-                VALUES (?, ?, 0, 0, 0, 0)
-            ");
-            $stmt->execute([$deviceHash, $today]);
-            $usage = ['text_count' => 0, 'image_count' => 0, 'premium' => 0, 'extra_questions' => 0];
-            error_log("Image processing - New usage record created successfully");
-        } else {
-            error_log("Image processing - Found existing usage record: " . json_encode($usage));
-        }
-
-        if ($type === 'image') {
-            $limit = $usage['premium'] ? 5 : 1;
-            $remaining = $limit - $usage['image_count'];
+        if (file_exists($cacheFile)) {
+            $cacheData = json_decode(file_get_contents($cacheFile), true);
+            $cacheAge = time() - $cacheData['timestamp'];
             
-            error_log("Image usage check - Used: {$usage['image_count']}, Limit: $limit, Remaining: $remaining");
-            
-            if ($usage['image_count'] >= $limit) {
-                if ($usage['premium']) {
-                    error_log("Premium user hit daily image limit");
-                    throw new Exception('Ați atins limita zilnică de 5 imagini premium. Reveniți mâine pentru analize noi!');
-                } else {
-                    error_log("Free user hit daily image limit");
-                    throw new Exception('Ați folosit analiza gratuită de astăzi! Upgradeați la Premium pentru 5 analize zilnice sau urmăriți o reclamă pentru o analiză extra.');
-                }
+            // Enterprise image cache expires after 6 hours
+            if ($cacheAge < 21600) {
+                error_log("Enterprise image cache hit for: " . substr($imageHash, 0, 15));
+                return $cacheData['treatment'];
+            } else {
+                unlink($cacheFile);
+                error_log("Enterprise image cache expired and removed: " . substr($imageHash, 0, 15));
             }
         }
         
-    } catch (PDOException $e) {
-        error_log("Image processing - Database error in checkUsageLimits: " . $e->getMessage());
-        throw new Exception('Eroare temporară la verificarea limitelor. Încercați din nou.');
+        return null;
+        
+    } catch (Exception $e) {
+        error_log("Enterprise image cache retrieval error: " . $e->getMessage());
+        return null;
     }
 }
 
-// ENHANCED RECORD USAGE for image processing
-function recordUsage($pdo, $deviceHash, $type) {
+function cacheImageTreatmentEnterprise($imageBase64, $treatment) {
     try {
-        $today = date('Y-m-d');
-        $field = $type === 'image' ? 'image_count' : 'text_count';
+        $imageHash = md5($imageBase64);
+        $cacheKey = 'enterprise_img_' . $imageHash;
+        $cacheFile = '/tmp/' . $cacheKey . '.json';
         
-        error_log("Image processing - Recording usage for device: $deviceHash, type: $type");
+        $cacheData = [
+            'treatment' => $treatment,
+            'timestamp' => time(),
+            'version' => 'enterprise_image_v2',
+            'hash' => $imageHash
+        ];
         
-        $stmt = $pdo->prepare("
-            UPDATE usage_tracking 
-            SET $field = $field + 1 
-            WHERE device_hash = ? AND date = ?
-        ");
-        $result = $stmt->execute([$deviceHash, $today]);
+        file_put_contents($cacheFile, json_encode($cacheData));
+        error_log("Enterprise image treatment cached: " . substr($imageHash, 0, 15));
         
-        if ($result) {
-            error_log("Image processing - Usage recorded successfully");
-        } else {
-            error_log("Image processing - Failed to record usage");
-        }
-        
-    } catch (PDOException $e) {
-        error_log("Image processing - Database error in recordUsage: " . $e->getMessage());
-        throw new Exception('Eroare la înregistrarea utilizării.');
+    } catch (Exception $e) {
+        error_log("Enterprise image cache storage error: " . $e->getMessage());
     }
 }
-
-// ENHANCED SAVE CHAT HISTORY for image processing
-function saveChatHistory($pdo, $deviceHash, $messageText, $isUserMessage, $messageType, $imageData) {
+// ENTERPRISE IMAGE ANTI-BOT PROTECTION
+function checkImageRateLimitsEnterprise($deviceHash) {
     try {
-        error_log("Image processing - Saving chat history for device: $deviceHash, type: $messageType, user: " . ($isUserMessage ? 'YES' : 'NO'));
-        
-        // For large images, store only a compressed version or reference
-        if ($messageType === 'image' && $imageData && strlen($imageData) > 1000000) {
-            error_log("Image processing - Large image detected, storing compressed version");
-            // Store only first 100KB of base64 for reference
-            $imageData = substr($imageData, 0, 100000) . '...[TRUNCATED]';
-        }
-        
-        $stmt = $pdo->prepare("
-            INSERT INTO chat_history (device_hash, message_text, is_user_message, message_type, image_data) 
-            VALUES (?, ?, ?, ?, ?)
-        ");
-        $result = $stmt->execute([
-            $deviceHash,
-            $messageText,
-            $isUserMessage ? 1 : 0,
-            $messageType,
-            $imageData
-        ]);
-        
-        if ($result) {
-            error_log("Image processing - Chat history saved successfully");
-        } else {
-            error_log("Image processing - Failed to save chat history");
-        }
-        
-    } catch (PDOException $e) {
-        error_log("Image processing - Database error in saveChatHistory: " . $e->getMessage());
-        // Don't throw exception here - chat history is not critical for image processing
-        error_log("Image processing - Continuing despite chat history save failure");
-    }
-}
-
-// ENHANCED ANTI-BOT PROTECTION FUNCTIONS for Image Processing
-function checkRateLimits($deviceHash) {
-    try {
-        $rateLimitFile = '/tmp/rate_limit_image_' . $deviceHash . '.txt';
+        $rateLimitFile = '/tmp/rate_limit_enterprise_image_' . $deviceHash . '.txt';
         $currentTime = time();
         
-        error_log("Image processing - Checking rate limits for device: $deviceHash");
+        error_log("Enterprise image rate limit check for device: $deviceHash");
         
-        // Clean old entries
         if (file_exists($rateLimitFile)) {
             $requests = json_decode(file_get_contents($rateLimitFile), true) ?: [];
             $requests = array_filter($requests, function($timestamp) use ($currentTime) {
-                return ($currentTime - $timestamp) < 300; // Keep only last 5 minutes for images
+                return ($currentTime - $timestamp) < 300; // Last 5 minutes for images
             });
-            error_log("Image processing - Found " . count($requests) . " requests in last 5 minutes");
+            error_log("Enterprise image found " . count($requests) . " requests in last 5 minutes");
         } else {
             $requests = [];
-            error_log("Image processing - No previous rate limit file found");
+            error_log("Enterprise image no previous rate limit file found");
         }
         
-        // Check if limit exceeded (3 image requests per 5 minutes)
-        if (count($requests) >= 3) {
-            error_log("Image processing - Rate limit exceeded for device: $deviceHash");
-            throw new Exception('Prea multe analize de imagini. Încercați din nou în 5 minute.');
+        // Enterprise allows more image requests (5 per 5 minutes vs 3 for basic)
+        if (count($requests) >= 5) {
+            error_log("Enterprise image rate limit exceeded for device: $deviceHash");
+            throw new Exception('Prea multe analize de imagini. Încercați din nou în 5 minute pentru a preveni supraîncărcarea sistemului.');
         }
         
-        // Add current request
         $requests[] = $currentTime;
         file_put_contents($rateLimitFile, json_encode($requests));
-        error_log("Image processing - Rate limit check passed, requests in last 5 min: " . count($requests));
+        error_log("Enterprise image rate limit check passed, requests in last 5 min: " . count($requests));
         
     } catch (Exception $e) {
         if (strpos($e->getMessage(), 'Prea multe analize') !== false) {
-            throw $e; // Re-throw rate limit exceptions
+            throw $e;
         }
-        error_log("Image processing - Error in rate limit check: " . $e->getMessage());
-        // Continue execution if file operations fail
+        error_log("Enterprise image error in rate limit check: " . $e->getMessage());
     }
 }
 
-function detectSuspiciousImageActivity($deviceHash, $imageBase64) {
+function detectSuspiciousImageActivityEnterprise($deviceHash, $imageBase64) {
     try {
         $imageHash = md5($imageBase64);
-        $suspiciousFile = '/tmp/suspicious_image_' . $deviceHash . '_' . $imageHash . '.txt';
+        $suspiciousFile = '/tmp/suspicious_enterprise_image_' . $deviceHash . '_' . $imageHash . '.txt';
         $currentTime = time();
         
-        error_log("Image processing - Checking suspicious activity for device: $deviceHash");
+        error_log("Enterprise image checking suspicious activity for device: $deviceHash");
         
-        // Check for repeated identical images
         if (file_exists($suspiciousFile)) {
             $data = json_decode(file_get_contents($suspiciousFile), true);
             $count = $data['count'] ?? 0;
             $lastTime = $data['last_time'] ?? 0;
             
-            // Reset count if more than 1 hour passed
-            if (($currentTime - $lastTime) > 3600) {
+            // Reset count if more than 2 hours passed (enterprise allows more flexibility)
+            if (($currentTime - $lastTime) > 7200) {
                 $count = 0;
             }
             
             $count++;
             
-            if ($count > 2) {
-                error_log("Image processing - Suspicious activity detected - repeated image from device: $deviceHash");
-                throw new Exception('Aceeași imagine trimisă prea des. Încercați cu o imagine diferită.');
+            // Enterprise allows more repeated images (5 vs 3 for basic)
+            if ($count > 5) {
+                error_log("Enterprise image suspicious activity detected - repeated image from device: $deviceHash");
+                throw new Exception('Aceeași imagine trimisă prea des. Încercați cu o imagine diferită sau așteptați 2 ore.');
             }
             
             file_put_contents($suspiciousFile, json_encode([
@@ -984,65 +1184,461 @@ function detectSuspiciousImageActivity($deviceHash, $imageBase64) {
             ]));
         }
         
-        error_log("Image processing - Suspicious activity check passed for device: $deviceHash");
+        error_log("Enterprise image suspicious activity check passed for device: $deviceHash");
         
     } catch (Exception $e) {
         if (strpos($e->getMessage(), 'Aceeași imagine') !== false) {
-            throw $e; // Re-throw suspicious activity exceptions
+            throw $e;
         }
-        error_log("Image processing - Error in suspicious activity check: " . $e->getMessage());
-        // Continue execution if file operations fail
+        error_log("Enterprise image error in suspicious activity check: " . $e->getMessage());
     }
 }
 
-// ENHANCED TEXT CLEANING FUNCTION with null safety
-function cleanForTTS($text) {
-    // Handle null input
+// ENTERPRISE IMAGE ANALYTICS TRACKING
+function trackImageEngagementEnterprise($pdo, $deviceHash, $imageAnalysis, $treatment, $visionResults) {
+    try {
+        error_log("Enterprise tracking image engagement for device: $deviceHash");
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO user_analytics 
+            (device_hash, message_length, response_length, content_type, urgency_level, 
+             plant_mentioned, problem_type, confidence_score, processing_time_ms, cached_response, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ");
+        
+        $processingTime = round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 2);
+        
+        $stmt->execute([
+            $deviceHash,
+            0, // Image length (not applicable)
+            strlen($treatment),
+            'image_analysis',
+            $imageAnalysis['health_status'] === 'diseased' ? 'high' : 'normal',
+            $imageAnalysis['plant_type'] !== 'unknown' ? 1 : 0,
+            !empty($imageAnalysis['problems_detected']) ? implode(',', $imageAnalysis['problems_detected']) : null,
+            $imageAnalysis['confidence'],
+            $processingTime,
+            0 // Not cached (new analysis)
+        ]);
+        
+        error_log("Enterprise image engagement tracked successfully");
+        
+        // Update popular plant topics
+        updatePopularPlantsEnterprise($pdo, $imageAnalysis, $visionResults);
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise DB error in image engagement tracking: " . $e->getMessage());
+    }
+}
+
+function updatePopularPlantsEnterprise($pdo, $imageAnalysis, $visionResults) {
+    try {
+        // Track detected plant types
+        if ($imageAnalysis['plant_type'] !== 'unknown') {
+            $stmt = $pdo->prepare("
+                INSERT INTO popular_topics (topic, category, count, last_mentioned) 
+                VALUES (?, 'plant', 1, NOW()) 
+                ON DUPLICATE KEY UPDATE 
+                count = count + 1, 
+                last_mentioned = NOW()
+            ");
+            $stmt->execute([$imageAnalysis['plant_type']]);
+        }
+        
+        // Track detected problems
+        foreach ($imageAnalysis['problems_detected'] as $problem) {
+            $stmt = $pdo->prepare("
+                INSERT INTO popular_topics (topic, category, count, last_mentioned) 
+                VALUES (?, 'problem', 1, NOW()) 
+                ON DUPLICATE KEY UPDATE 
+                count = count + 1, 
+                last_mentioned = NOW()
+            ");
+            $stmt->execute(['image_' . $problem]);
+        }
+        
+        // Track health status
+        if ($imageAnalysis['health_status'] !== 'unknown') {
+            $stmt = $pdo->prepare("
+                INSERT INTO popular_topics (topic, category, count, last_mentioned) 
+                VALUES (?, 'health', 1, NOW()) 
+                ON DUPLICATE KEY UPDATE 
+                count = count + 1, 
+                last_mentioned = NOW()
+            ");
+            $stmt->execute(['health_' . $imageAnalysis['health_status']]);
+        }
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise error updating popular plants: " . $e->getMessage());
+    }
+}
+
+function updateUserContextWithImageEnterprise($pdo, $deviceHash, $imageAnalysis) {
+    try {
+        if ($imageAnalysis['plant_type'] !== 'unknown') {
+            $stmt = $pdo->prepare("SELECT favorite_plants FROM user_profiles WHERE device_hash = ?");
+            $stmt->execute([$deviceHash]);
+            $currentPlants = json_decode($stmt->fetchColumn() ?? '[]', true);
+            
+            // Add detected plant to favorites
+            if (!in_array($imageAnalysis['plant_type'], $currentPlants)) {
+                $currentPlants[] = $imageAnalysis['plant_type'];
+                
+                $stmt = $pdo->prepare("
+                    UPDATE user_profiles 
+                    SET favorite_plants = ?, last_activity = NOW(), total_questions = total_questions + 1
+                    WHERE device_hash = ?
+                ");
+                $stmt->execute([json_encode($currentPlants), $deviceHash]);
+                
+                error_log("Enterprise user context updated with plant: " . $imageAnalysis['plant_type']);
+            }
+        }
+        
+        // Update experience level based on image complexity
+        if ($imageAnalysis['confidence'] > 0.8) {
+            $stmt = $pdo->prepare("
+                UPDATE user_profiles 
+                SET experience_level = CASE 
+                    WHEN experience_level = 'începător' AND total_questions > 10 THEN 'intermediar'
+                    WHEN experience_level = 'intermediar' AND total_questions > 25 THEN 'avansat'
+                    ELSE experience_level
+                END
+                WHERE device_hash = ?
+            ");
+            $stmt->execute([$deviceHash]);
+        }
+        
+    } catch (Exception $e) {
+        error_log("Enterprise error updating user context with image: " . $e->getMessage());
+    }
+}
+
+// ENTERPRISE SEASONAL FUNCTIONS (shared with text system)
+function getSeasonEnterprise($month) {
+    if ($month >= 3 && $month <= 5) return 'primăvara';
+    if ($month >= 6 && $month <= 8) return 'vara';
+    if ($month >= 9 && $month <= 11) return 'toamna';
+    return 'iarna';
+}
+
+function getSeasonalContextEnterprise($season, $month) {
+    $seasonalData = [
+        'primăvara' => [
+            'activities' => 'semănatul legumelor, plantatul puieților, pregătirea solului, tăierea pomilor',
+            'plants' => 'salată, ridichi, mazăre, morcov, ceapă, usturoi de primăvară',
+            'common_issues' => 'îngheț târziu, sol prea umed, dăunători care se trezesc, boli fungice'
+        ],
+        'vara' => [
+            'activities' => 'udatul regulat, recoltatul continuu, tratarea dăunătorilor, legarea plantelor',
+            'plants' => 'tomate, castraveți, ardei, vinete, floarea-soarelui, bostan',
+            'common_issues' => 'secetă, căldură excesivă, boli fungice, afide, păianjenul roșu'
+        ],
+        'toamna' => [
+            'activities' => 'recoltatul de toamnă, pregătirea pentru iarnă, plantatul bulbilor, compostarea',
+            'plants' => 'varză, spanac, ridichi de toamnă, usturoi de iarnă, ceapă de iarnă',
+            'common_issues' => 'umiditate excesivă, putregai, pregătirea pentru ger, depozitarea recoltei'
+        ],
+        'iarna' => [
+            'activities' => 'protecția plantelor, planificarea grădinii, întreținerea uneltelor, răsaduri în casă',
+            'plants' => 'plante de interior, microverdeturi, răsaduri în seră, planificarea pentru primăvară',
+            'common_issues' => 'ger, lipsa luminii, aer uscat în interior, planificare pentru anul următor'
+        ]
+    ];
+    
+    return $seasonalData[$season] ?? $seasonalData['primăvara'];
+}
+
+// ENTERPRISE DATABASE FUNCTIONS (shared with text system)
+function connectToDatabaseEnterprise() {
+    try {
+        $host = getenv('DB_HOST');
+        $dbname = getenv('DB_NAME');
+        $username = getenv('DB_USER');
+        $password = getenv('DB_PASS');
+        
+        error_log("Enterprise DB connection for images to: $host");
+        
+        $dsn = "mysql:host=$host;dbname=$dbname;charset=utf8mb4";
+        $pdo = new PDO($dsn, $username, $password, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_TIMEOUT => 15,
+            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
+            PDO::ATTR_PERSISTENT => false
+        ]);
+        
+        $pdo->query("SELECT 1");
+        error_log("Enterprise DB connection for images successful");
+        return $pdo;
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise DB connection for images failed: " . $e->getMessage());
+        throw new Exception('Nu pot conecta la baza de date momentan. Încercați din nou în câteva secunde.');
+    }
+}
+
+function checkUsageLimitsEnterprise($pdo, $deviceHash, $type) {
+    try {
+        $today = date('Y-m-d');
+        error_log("Enterprise usage limits check for images: $deviceHash on $today");
+        
+        $stmt = $pdo->prepare("
+            SELECT text_count, image_count, premium, extra_questions 
+            FROM usage_tracking 
+            WHERE device_hash = ? AND date = ?
+        ");
+        $stmt->execute([$deviceHash, $today]);
+        $usage = $stmt->fetch();
+
+        if (!$usage) {
+            $stmt = $pdo->prepare("
+                INSERT INTO usage_tracking (device_hash, date, text_count, image_count, premium, extra_questions) 
+                VALUES (?, ?, 0, 0, 0, 0)
+            ");
+            $stmt->execute([$deviceHash, $today]);
+            $usage = ['text_count' => 0, 'image_count' => 0, 'premium' => 0, 'extra_questions' => 0];
+        }
+
+        if ($type === 'image') {
+            $limit = $usage['premium'] ? 10 : 2; // Enterprise: 10 premium, 2 free (vs 5/1 basic)
+            $remaining = $limit - $usage['image_count'];
+            
+            error_log("Enterprise image usage: used {$usage['image_count']}, limit $limit, remaining $remaining");
+            
+            if ($usage['image_count'] >= $limit) {
+                if ($usage['premium']) {
+                    throw new Exception('Ați atins limita zilnică de 10 analize premium de imagini. Reveniți mâine pentru analize noi!');
+                } else {
+                    throw new Exception('Ați folosit cele 2 analize gratuite de imagini de astăzi! Upgradeați la Premium pentru 10 analize zilnice sau urmăriți o reclamă pentru analize extra.');
+                }
+            }
+        }
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise DB error in image usage limits: " . $e->getMessage());
+        throw new Exception('Eroare temporară la verificarea limitelor. Încercați din nou în câteva secunde.');
+    }
+}
+
+function recordUsageEnterprise($pdo, $deviceHash, $type) {
+    try {
+        $today = date('Y-m-d');
+        $field = $type === 'image' ? 'image_count' : 'text_count';
+        
+        error_log("Enterprise recording image usage for device: $deviceHash");
+        
+        $stmt = $pdo->prepare("
+            UPDATE usage_tracking 
+            SET $field = $field + 1, last_activity = NOW() 
+            WHERE device_hash = ? AND date = ?
+        ");
+        $result = $stmt->execute([$deviceHash, $today]);
+        
+        if ($result) {
+            error_log("Enterprise image usage recorded successfully");
+            updateDailyStatisticsEnterprise($pdo, $type);
+        }
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise DB error in record image usage: " . $e->getMessage());
+        throw new Exception('Eroare la înregistrarea utilizării.');
+    }
+}
+
+function saveChatHistoryEnterprise($pdo, $deviceHash, $messageText, $isUserMessage, $messageType, $imageData) {
+    try {
+        error_log("Enterprise saving image chat history for device: $deviceHash");
+        
+        // Handle large image data
+        if ($messageType === 'image' && $imageData && strlen($imageData) > 500000) {
+            error_log("Enterprise large image detected, storing compressed reference");
+            $imageData = substr($imageData, 0, 100000) . '...[ENTERPRISE_TRUNCATED]';
+        }
+        
+        if (strlen($messageText) > 10000) {
+            $messageText = substr($messageText, 0, 10000) . '...[ENTERPRISE_TRUNCATED]';
+        }
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO chat_history (device_hash, message_text, is_user_message, message_type, image_data, created_at) 
+            VALUES (?, ?, ?, ?, ?, NOW())
+        ");
+        $result = $stmt->execute([
+            $deviceHash,
+            $messageText,
+            $isUserMessage ? 1 : 0,
+            $messageType,
+            $imageData
+        ]);
+        
+        if ($result) {
+            error_log("Enterprise image chat history saved successfully");
+        }
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise DB error in save image chat history: " . $e->getMessage());
+    }
+}
+
+function getUserContextEnterprise($pdo, $deviceHash) {
+    try {
+        error_log("Enterprise retrieving user context for images: $deviceHash");
+        
+        $stmt = $pdo->prepare("
+            SELECT experience_level, garden_type, region, favorite_plants, 
+                   last_activity, total_questions, premium
+            FROM user_profiles 
+            WHERE device_hash = ?
+        ");
+        $stmt->execute([$deviceHash]);
+        $profile = $stmt->fetch();
+        
+        if (!$profile) {
+            $defaultProfile = [
+                'experience_level' => 'începător',
+                'garden_type' => 'general',
+                'region' => 'România',
+                'favorite_plants' => [],
+                'total_questions' => 0,
+                'premium' => false
+            ];
+            
+            createUserProfileEnterprise($pdo, $deviceHash, $defaultProfile);
+            return $defaultProfile;
+        }
+        
+        return [
+            'experience_level' => $profile['experience_level'] ?? 'începător',
+            'garden_type' => $profile['garden_type'] ?? 'general',
+            'region' => $profile['region'] ?? 'România',
+            'favorite_plants' => json_decode($profile['favorite_plants'] ?? '[]', true),
+            'total_questions' => $profile['total_questions'] ?? 0,
+            'premium' => (bool)($profile['premium'] ?? false)
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Enterprise user context error for images: " . $e->getMessage());
+        return [
+            'experience_level' => 'începător',
+            'garden_type' => 'general',
+            'region' => 'România',
+            'favorite_plants' => [],
+            'total_questions' => 0,
+            'premium' => false
+        ];
+    }
+}
+
+function createUserProfileEnterprise($pdo, $deviceHash, $profile) {
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO user_profiles 
+            (device_hash, experience_level, garden_type, region, favorite_plants, created_at) 
+            VALUES (?, ?, ?, ?, ?, NOW())
+        ");
+        $stmt->execute([
+            $deviceHash,
+            $profile['experience_level'],
+            $profile['garden_type'],
+            $profile['region'],
+            json_encode($profile['favorite_plants'])
+        ]);
+        
+        error_log("Enterprise user profile created for images: $deviceHash");
+        
+    } catch (Exception $e) {
+        error_log("Enterprise user profile creation error for images: " . $e->getMessage());
+    }
+}
+
+function updateDailyStatisticsEnterprise($pdo, $type) {
+    try {
+        $today = date('Y-m-d');
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO daily_statistics (date, text_requests, image_requests) 
+            VALUES (?, ?, ?) 
+            ON DUPLICATE KEY UPDATE 
+            text_requests = text_requests + ?, 
+            image_requests = image_requests + ?
+        ");
+        
+        $textIncrement = ($type === 'text') ? 1 : 0;
+        $imageIncrement = ($type === 'image') ? 1 : 0;
+        
+        $stmt->execute([$today, $textIncrement, $imageIncrement, $textIncrement, $imageIncrement]);
+        
+    } catch (PDOException $e) {
+        error_log("Enterprise error updating daily statistics for images: " . $e->getMessage());
+    }
+}
+
+// ENTERPRISE TEXT CLEANING FUNCTION (shared)
+function cleanForTTSEnterprise($text) {
     if ($text === null || $text === '') {
         return '';
     }
     
-    // Convert to string if not already
     $text = (string) $text;
     
-    // Clean text for TTS - FIXED regex patterns
-    $text = preg_replace('/\*+/', '', $text);                    // Remove asterisks
-    $text = preg_replace('/^\d+\.\s*/m', '', $text);            // Remove numbered lists
-    $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);         // Remove bullet points
-    $text = preg_replace('/\s+/', ' ', $text);                  // Multiple spaces to single
-    $text = preg_replace('/[#@$%^&(){}|\\\\]/', '', $text);     // FIXED: Escaped brackets properly
-    $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);   // Fix punctuation spacing
-    $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);       // Remove percentages
+    // Enhanced cleaning for enterprise TTS
+    $text = preg_replace('/\*+/', '', $text);
+    $text = preg_replace('/^\d+\.\s*/m', '', $text);
+    $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);
+    $text = preg_replace('/\s+/', ' ', $text);
+    $text = preg_replace('/[#@$%^&(){}|\\\\]/', '', $text);
+    $text = preg_replace('/\s*([,.!?;:])\s*/', '$1 ', $text);
+    $text = preg_replace('/\s*\(\d+%\)\s*/', ' ', $text);
+    $text = preg_replace('/\s*\[.*?\]\s*/', ' ', $text);
+    $text = preg_replace('/🚨|⚡|✅|❌|🌱|📸|🏢/', '', $text);
     
     return trim($text);
 }
 
-// MEMORY CLEANUP FUNCTION for large image processing
-function cleanupMemory() {
-    // Force garbage collection
-    if (function_exists('gc_collect_cycles')) {
-        $collected = gc_collect_cycles();
-        error_log("Image processing - Garbage collection freed $collected cycles");
-    }
-    
-    // Clear any temporary files older than 1 hour
-    $tempDir = sys_get_temp_dir();
-    $files = glob($tempDir . '/rate_limit_image_*.txt');
-    $files = array_merge($files, glob($tempDir . '/suspicious_image_*.txt'));
-    
-    $currentTime = time();
-    $cleaned = 0;
-    
-    foreach ($files as $file) {
-        if (file_exists($file) && ($currentTime - filemtime($file)) > 3600) {
-            unlink($file);
-            $cleaned++;
+// ENTERPRISE MEMORY CLEANUP FOR IMAGES
+function cleanupImageMemoryEnterprise() {
+    try {
+        if (function_exists('gc_collect_cycles')) {
+            $collected = gc_collect_cycles();
+            error_log("Enterprise image garbage collection freed $collected cycles");
         }
-    }
-    
-    if ($cleaned > 0) {
-        error_log("Image processing - Cleaned up $cleaned temporary files");
+        
+        $tempDir = sys_get_temp_dir();
+        $patterns = [
+            '/rate_limit_enterprise_image_*.txt',
+            '/suspicious_enterprise_image_*.txt',
+            '/enterprise_img_*.json'
+        ];
+        
+        $currentTime = time();
+        $cleaned = 0;
+        
+        foreach ($patterns as $pattern) {
+            $files = glob($tempDir . $pattern);
+            foreach ($files as $file) {
+                if (file_exists($file) && ($currentTime - filemtime($file)) > 7200) { // 2 hours
+                    unlink($file);
+                    $cleaned++;
+                }
+            }
+        }
+        
+        if ($cleaned > 0) {
+            error_log("Enterprise image cleaned up $cleaned temporary files");
+        }
+        
+        $memoryUsage = memory_get_usage(true) / 1024 / 1024;
+        $peakMemory = memory_get_peak_usage(true) / 1024 / 1024;
+        error_log("Enterprise image final memory usage: {$memoryUsage} MB, Peak: {$peakMemory} MB");
+        
+    } catch (Exception $e) {
+        error_log("Enterprise image cleanup error: " . $e->getMessage());
     }
 }
+
+// Register cleanup function for images
+register_shutdown_function('cleanupImageMemoryEnterprise');
 
 ?>
