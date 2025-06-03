@@ -69,6 +69,7 @@ try {
     // ENTERPRISE PIPELINE - Step 1: Advanced Text Validation
     error_log("STEP 1: Advanced text validation...");
     $validatedMessage = validateTextInputEnterprise($message);
+    sendProgressUpdate('validating', 'Validez mesajul...');
     
     // ENTERPRISE PIPELINE - Step 2: Security Scanning
     error_log("STEP 2: Enterprise security scanning...");
@@ -76,6 +77,7 @@ try {
 
     // ENTERPRISE PIPELINE - Step 3: Content Analysis
     error_log("STEP 3: Content analysis and classification...");
+    sendProgressUpdate('analyzing', 'Analizez conținutul...');
     $contentAnalysis = analyzeContentEnterprise($validatedMessage);
     error_log("Content analysis result: " . json_encode($contentAnalysis));
 
@@ -119,11 +121,13 @@ try {
 
     // ENTERPRISE PIPELINE - Step 9: Enhanced AI Processing
     error_log("STEP 9: Enterprise AI processing with context awareness...");
+    sendProgressUpdate('thinking', 'Mă gândesc la răspuns...');
     $response = getEnhancedAIResponseEnterprise($validatedMessage, $contentAnalysis, $userContext);
     error_log("Enterprise AI response generated successfully (length: " . strlen($response) . ")");
 
     // ENTERPRISE PIPELINE - Step 10: Response Caching
     error_log("STEP 10: Caching enterprise response...");
+    sendProgressUpdate('writing', 'Scriu răspunsul...');
     cacheResponseEnterprise($validatedMessage, $response);
 
     // ENTERPRISE PIPELINE - Step 11: Data Persistence
