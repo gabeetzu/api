@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
+mb_internal_encoding("UTF-8");
 
 // Handle CORS preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -215,9 +216,11 @@ function getGPTResponse($prompt) {
         ],
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o',
-            'messages' => [
-                ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.']
-            ],
+'messages' => [
+    ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.'],
+    ['role' => 'user', 'content' => $prompt]
+],
+
             'temperature' => 0.2,
             'max_tokens' => 600
         ])
