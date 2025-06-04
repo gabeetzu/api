@@ -141,7 +141,7 @@ Ești un expert grădinar. Structurează răspunsurile exact astfel:
 Folosește doar structura de mai sus. Fără markdown.
 PROMPT;
 
-    return getGPTResponse("$systemPrompt\n\nUtilizator: $message", false);
+    return getGPTResponse($systemPrompt, $message);
 }
 
 // ====================
@@ -200,8 +200,8 @@ function extractVisualFeatures($visionData) {
     return array_unique($features);
 }
 
-function getGPTResponse($prompt, $isImage) {
-    $model = $isImage ? 'gpt-4o-mini' : 'gpt-4o-mini'; // For text too, since you're sticking to mini for efficiency.
+function getGPTResponse($systemPrompt, $userPrompt) {
+    $model = 'gpt-4o-mini';
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -212,21 +212,19 @@ function getGPTResponse($prompt, $isImage) {
         CURLOPT_POSTFIELDS => json_encode([
             'model' => $model,
             'messages' => [
-                ['role' => 'system', 'content' => 'Răspunsuri structurate, fără markdown.'],
-                ['role' => 'user', 'content' => $prompt]
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userPrompt]
             ],
-            'temperature' => $isImage ? 0.2 : 0.4,
+            'temperature' => 0.4,
             'max_tokens' => 600
         ])
     ]);
-
     $response = curl_exec($ch);
     if (!$response) throw new Exception('Eroare AI');
     
     $data = json_decode($response, true);
     return $data['choices'][0]['message']['content'];
 }
-
 
 // ====================
 // RESPONSE FORMATTING
