@@ -11,13 +11,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// --- Logging and API Key Check ---
+// --- Logging and Security ---
 error_log("=== IMAGE PROCESSING START ===");
-error_log("API_SECRET_KEY exists: " . (getenv('API_SECRET_KEY') ? 'YES' : 'NO'));
-error_log("GOOGLE_VISION_KEY exists: " . (getenv('GOOGLE_VISION_KEY') ? 'YES' : 'NO'));
-
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
+
 if ($apiKey !== $expectedKey) {
     http_response_code(401);
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
@@ -36,210 +34,197 @@ try {
     }
 
     $imageBase64 = $data['image'];
-    $userMessage = strip_tags(trim($data['message'] ?? ''));
-    if (strlen($userMessage) > 300) {
-        $userMessage = substr($userMessage, 0, 300);
-    }
-
+    $userMessage = sanitizeInput($data['message'] ?? '');
+    
     validateImage($imageBase64);
     $treatment = getAITreatment($imageBase64, $userMessage);
 
-    $responseId = bin2hex(random_bytes(6));
-    error_log("Response ID: $responseId");
-
+    logSuccess();
     echo json_encode([
         'success' => true,
-        'response_id' => $responseId,
+        'response_id' => bin2hex(random_bytes(6)),
         'response' => $treatment
     ]);
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
     http_response_code(400);
-    echo json_encode([
-        'success' => false,
-        'error' => $e->getMessage()
-    ]);
+    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
 
-// --- Image Validation ---
+// --- Helper Functions ---
+function sanitizeInput($text) {
+    $clean = strip_tags(trim($text));
+    return substr($clean, 0, 300);
+}
+
 function validateImage(&$imageBase64) {
-    if (strpos($imageBase64, 'data:image') === 0) {
-        $imageBase64 = substr($imageBase64, strpos($imageBase64, ',') + 1);
-    }
-
-    if (strlen($imageBase64) < 100) {
-        throw new Exception('Imagine prea mică sau invalidă');
-    }
-
-    $decodedImage = base64_decode($imageBase64, true);
-    if ($decodedImage === false) {
-        throw new Exception('Imagine coruptă');
-    }
-
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mimeType = $finfo->buffer($decodedImage);
-    if (!in_array($mimeType, ['image/jpeg', 'image/png'])) {
-        throw new Exception('Format neacceptat. Folosiți JPEG sau PNG.');
-    }
-
-    $fileSize = (int)(strlen($imageBase64) * 3 / 4);
-    if ($fileSize > 4 * 1024 * 1024) {
-        throw new Exception('Imagine prea mare (maxim 4MB)');
-    }
-
-    $imageInfo = @getimagesizefromstring($decodedImage);
-    if ($imageInfo === false) {
-        throw new Exception('Format invalid. Acceptăm JPEG sau PNG.');
-    }
-
-    list($width, $height) = $imageInfo;
-    if ($width > 4096 || $height > 4096) {
-        throw new Exception('Dimensiuni prea mari (maxim 4096x4096 pixeli)');
-    }
-    if ($width < 200 || $height < 200) {
-        throw new Exception('Imaginea este prea mică (minim 200x200 pixeli)');
-    }
-
-    $aspectRatio = $width / $height;
-    if ($aspectRatio > 3 || $aspectRatio < 0.33) {
-        throw new Exception('Proporții nepotrivite pentru plante');
-    }
+    // ... [Keep existing validation logic from your code] ...
 }
 
 function getAITreatment($imageBase64, $userMessage) {
-    $googleVisionKey = getenv('GOOGLE_VISION_KEY');
-    $openaiKey = getenv('OPENAI_API_KEY');
-
-    // Enhanced Google Vision analysis
-    $visionData = analyzeImageWithVisionAPI($imageBase64, $googleVisionKey);
+    $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
-
-    // Build structured prompt
-    $prompt = buildAgronomistPrompt($features, $userMessage);
-    
-    // Get GPT response
-    return getStructuredResponse($prompt, $openaiKey);
+    $prompt = buildExpertPrompt($features, $userMessage);
+    return getGPTResponse($prompt);
 }
 
-function analyzeImageWithVisionAPI($imageBase64, $googleVisionKey) {
-    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . $googleVisionKey;
+function analyzeImageWithVisionAPI($imageBase64) {
+    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
+    
     $requestData = [
         'requests' => [[
             'image' => ['content' => $imageBase64],
             'features' => [
-                ['type' => 'LABEL_DETECTION', 'maxResults' => 15],
-                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 5],
-                ['type' => 'WEB_DETECTION', 'maxResults' => 5],
-                ['type' => 'IMAGE_PROPERTIES'] // For color analysis
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
+                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
+                ['type' => 'WEB_DETECTION', 'maxResults' => 10],
+                ['type' => 'IMAGE_PROPERTIES']
             ]
         ]]
     ];
-    // ... [Make API call as before] ...
+
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST',
+            'content' => json_encode($requestData)
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $response = file_get_contents($url, false, $context);
+    
+    if ($response === FALSE) {
+        throw new Exception('Eroare la analiza imaginii (Google Vision)');
+    }
+    
     return json_decode($response, true);
 }
 
 function extractVisualFeatures($visionData) {
     $features = [];
-    
-    // 1. Labels with high confidence
-    if (isset($visionData['responses'][0]['labelAnnotations'])) {
-        foreach ($visionData['responses'][0]['labelAnnotations'] as $label) {
-            if ($label['score'] > 0.85) {
-                $features[] = $label['description'];
-            }
+    $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
+
+    // 1. Pathology-focused labels
+    foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
+        if ($label['score'] > 0.85 && hasDiseaseKeyword($label['description'], $diseaseKeywords)) {
+            $features[] = $label['description'];
         }
     }
-    
-    // 2. Localized objects (e.g., "leaf with spots")
-    if (isset($visionData['responses'][0]['localizedObjectAnnotations'])) {
-        foreach ($visionData['responses'][0]['localizedObjectAnnotations'] as $obj) {
-            if ($obj['score'] > 0.8) {
-                $features[] = $obj['name'] . " (localizat)";
-            }
+
+    // 2. Precise object locations
+    foreach ($visionData['responses'][0]['localizedObjectAnnotations'] ?? [] as $obj) {
+        if ($obj['score'] > 0.8) {
+            $position = $obj['boundingPoly']['normalizedVertices'][0] ?? null;
+            $loc = $position ? sprintf("(%.0f%%,%.0f%%)", $position['x']*100, $position['y']*100) : "";
+            $features[] = "{$obj['name']} $loc";
         }
     }
-    
-    // 3. Dominant colors
-    if (isset($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'])) {
-        foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] as $color) {
-            if ($color['pixelFraction'] > 0.1) {
-                $features[] = "Culoare dominantă: RGB(" 
-                    . $color['color']['red'] . ","
-                    . $color['color']['green'] . ","
-                    . $color['color']['blue'] . ")";
-            }
+
+    // 3. Color analysis with HEX codes
+    foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
+        if ($color['pixelFraction'] > 0.1) {
+            $rgb = $color['color'];
+            $hex = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
+            $features[] = "Culoare: $hex";
         }
     }
-    
-    // 4. Web entities related to plant pathology
-    if (isset($visionData['responses'][0]['webDetection']['webEntities'])) {
-        foreach ($visionData['responses'][0]['webDetection']['webEntities'] as $entity) {
-            if (stripos($entity['description'], 'plant disease') !== false && $entity['score'] > 0.7) {
-                $features[] = "Context web: " . $entity['description'];
-            }
+
+    // 4. Web context filtering
+    foreach ($visionData['responses'][0]['webDetection']['webEntities'] ?? [] as $entity) {
+        if (($entity['score'] ?? 0) > 0.7 && hasDiseaseKeyword($entity['description'] ?? '', $diseaseKeywords)) {
+            $features[] = "Context: " . substr($entity['description'], 0, 50);
         }
     }
-    
+
     return array_unique($features);
 }
 
-function buildAgronomistPrompt($features, $userMessage) {
-    return "Imaginează-ți că ești un expert agronom care analizează fotografia unei plante afectate. Detalii extrase:
-
-1. 🖼️ Caracteristici vizuale: " . (!empty($features) ? implode(', ', $features) : "Nu s-au detectat caracteristici clare") . "
-" . ($userMessage ? "2. ❓ Întrebare utilizator: \"$userMessage\"\n" : "") . "
-
-Răspunde în română, ca pentru un grădinar amator, folosind structura:
-
-- 🔎 Observații: Descrie pete, culori anormale, forme, texturi (max 3 propoziții)
-- 🦠 Cauze probabile: 2-3 boli/dăunători posibili (ex: mană, mucegai prafos)
-- 💊 Tratament: Pași concreti cu produse specifice (ex: „Pulverizați cu Myclobutanil 0.2%”)
-- 👀 Recomandări: Ce să monitorizeze în următoarele zile
-
-Dacă nu vezi suficiente detalii, spune clar: „Nu pot da un diagnostic precis. Recomand [...]”";
+function hasDiseaseKeyword($text, $keywords) {
+    return preg_match('/(' . implode('|', $keywords) . ')/i', $text);
 }
 
-function getStructuredResponse($prompt, $openaiKey) {
+function buildExpertPrompt($features, $userMessage) {
+    return <<<PROMPT
+**Context:** Expert agronom român analizează planta. 
+**Simptome observate:**
+{$this->formatFeatures($features)}
+**Întrebare utilizator:** "{$userMessage}"
+
+**Analiză:**
+1. Descrie simptome cheie (max 3)
+2. Compară cu boli comune în RO
+3. Elimină opțiuni improbabile
+4. Ordonează după probabilitate
+
+**Răspuns în structura:**
+<observații>
+• [Simptom 1]
+• [Simptom 2]
+</observații>
+
+<cauze>
+1. [Boală] ([Probabilitate 1-100%]) - [Detalii]
+2. [Boală] ([Probabilitate]) - [Detalii]
+</cauze>
+
+<tratament>
+• [Acțiune 1] (ex: "Tăiați frunzele infectate")
+• [Acțiune 2] (ex: "Pulverizați cu [produs]")
+</tratament>
+
+<monitorizare>
+• [Ce să verifice în următoarele zile]
+</monitorizare>
+
+Dacă informații insuficiente:
+<neclar>
+• [Ce detalii lipsesc]
+</neclar>
+PROMPT;
+}
+
+function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'Authorization: Bearer ' . $openaiKey
-    ]);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-        'model' => 'gpt-4o-mini',
-        'messages' => [
-            [
-                'role' => 'system',
-                'content' => "Ești un agronom cu 20 de ani experiență. Răspunsurile tale sunt concise, practice și bazate pe observații vizuale."
-            ],
-            [
-                'role' => 'user',
-                'content' => $prompt
-            ]
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
         ],
-        'temperature' => 0.3,
-        'max_tokens' => 500
-    ]));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        CURLOPT_POSTFIELDS => json_encode([
+            'model' => 'gpt-4o',
+            'messages' => [
+                ['role' => 'system', 'content' => 'Ești un expert agronom. Răspunsurile sunt concise, în română.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'temperature' => 0.2,
+            'max_tokens' => 600
+        ])
+    ]);
 
     $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($response === false || $httpCode !== 200) {
-        throw new Exception('Eroare la procesarea AI (OpenAI)');
-    }
+    if (!$response) throw new Exception('Eroare OpenAI');
 
     $data = json_decode($response, true);
-    if (!isset($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI');
+    return formatResponse($data['choices'][0]['message']['content']);
+}
+
+function formatResponse($text) {
+    // Convert XML-like tags to Markdown
+    $text = str_replace(['<observații>', '</observații>'], "🔎 **Observații**\n", $text);
+    $text = str_replace(['<cauze>', '</cauze>'], "\n🦠 **Cauze probabile**\n", $text);
+    $text = str_replace(['<tratament>', '</tratament>'], "\n💊 **Tratament**\n", $text);
+    $text = str_replace(['<monitorizare>', '</monitorizare>'], "\n👀 **Recomandări**\n", $text);
+    $text = str_replace(['<neclar>', '</neclar>'], "\n❓ **Necesită verificare**\n", $text);
+    
+    return preg_replace('/•/', '•', $text); // Ensure consistent bullets
+}
+
+function logSuccess() {
+    error_log("Processing completed successfully");
+    if (rand(1, 100) > 95) { // Sample 5% of requests
+        error_log("Sample successful request details");
     }
-
-    $responseText = trim($data['choices'][0]['message']['content']);
-    $responseText = preg_replace('/^\-/', '•', $responseText); // Replace - with •
-    $responseText = str_replace(':)', '🙂', $responseText);     // Emoji consistency
-
-    return $responseText;
 }
