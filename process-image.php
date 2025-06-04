@@ -26,16 +26,25 @@ ini_set('max_execution_time', '60');
 ini_set('memory_limit', '512M');
 
 try {
-    $input = file_get_contents('php://input');
-    $data = json_decode($input, true);
-
-    if (!$data || !isset($data['image'])) {
+    // Accept both JSON and form-data
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (stripos($contentType, 'application/json') !== false) {
+        $input = file_get_contents('php://input');
+        $data = json_decode($input, true);
+        $imageBase64 = $data['image'] ?? '';
+        $userMessage = sanitizeInput($data['message'] ?? '');
+    } elseif (isset($_FILES['image'])) {
+        $imageData = file_get_contents($_FILES['image']['tmp_name']);
+        $imageBase64 = base64_encode($imageData);
+        $userMessage = isset($_POST['message']) ? sanitizeInput($_POST['message']) : '';
+    } else {
         throw new Exception('Date lipsă: Imaginea nu a fost primită');
     }
 
-    $imageBase64 = $data['image'];
-    $userMessage = sanitizeInput($data['message'] ?? '');
-    
+    if (empty($imageBase64)) {
+        throw new Exception('Date lipsă: Imaginea nu a fost primită');
+    }
+
     validateImage($imageBase64);
     $treatment = getAITreatment($imageBase64, $userMessage);
 
@@ -55,11 +64,17 @@ try {
 // --- Helper Functions ---
 function sanitizeInput($text) {
     $clean = strip_tags(trim($text));
-    return substr($clean, 0, 300);
+    return mb_substr($clean, 0, 300);
 }
 
 function validateImage(&$imageBase64) {
-    // ... [Keep existing validation logic from your code] ...
+    // Basic validation: check if base64 string is valid and not too large
+    if (strlen($imageBase64) > 5 * 1024 * 1024) { // 5MB limit
+        throw new Exception('Imagine prea mare');
+    }
+    if (!preg_match('/^[a-zA-Z0-9\/\r\n+]*={0,2}$/', $imageBase64)) {
+        throw new Exception('Imagine invalidă');
+    }
 }
 
 function getAITreatment($imageBase64, $userMessage) {
@@ -145,12 +160,17 @@ function hasDiseaseKeyword($text, $keywords) {
     return preg_match('/(' . implode('|', $keywords) . ')/i', $text);
 }
 
+function formatFeatures(array $features): string {
+    return $features ? "• " . implode("\n• ", $features) : 'Nicio caracteristică detectată';
+}
+
 function buildExpertPrompt($features, $userMessage) {
+    $formattedFeatures = formatFeatures($features);
     return <<<PROMPT
 **Context:** Expert agronom român analizează planta. 
 **Simptome observate:**
-{$this->formatFeatures($features)}
-**Întrebare utilizator:** "{$userMessage}"
+$formattedFeatures
+**Întrebare utilizator:** "$userMessage"
 
 **Analiză:**
 1. Descrie simptome cheie (max 3)
@@ -228,3 +248,5 @@ function logSuccess() {
         error_log("Sample successful request details");
     }
 }
+
+?>
