@@ -97,10 +97,7 @@ try {
     }
 
     // Response
-    echo json_encode([
-        'success' => true,
-        'treatment' => $treatment
-    ]);
+echo json_encode(['success' => true, 'response' => $treatment]);
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
