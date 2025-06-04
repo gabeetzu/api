@@ -233,10 +233,16 @@ function getGPTResponse($prompt) {
             'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'model' => 'gpt-4o',
+            'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.'],
-                ['role' => 'user', 'content' => $prompt]
+                [
+                    'role' => 'system',
+                    'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.'
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $prompt
+                ]
             ],
             'temperature' => 0.2,
             'max_tokens' => 600
@@ -245,10 +251,15 @@ function getGPTResponse($prompt) {
 
     $response = curl_exec($ch);
     if (!$response) throw new Exception('Eroare OpenAI');
+    
     $data = json_decode($response, true);
-    if (!isset($data['choices'][0]['message']['content'])) throw new Exception('Răspuns invalid de la OpenAI');
+    if (!isset($data['choices'][0]['message']['content'])) {
+        throw new Exception('Răspuns invalid de la OpenAI');
+    }
+
     return formatResponse($data['choices'][0]['message']['content']);
 }
+
 
 function formatResponse($text) {
     $text = str_replace(['<observații>', '</observații>'], "🔎 Observații\n", $text);
