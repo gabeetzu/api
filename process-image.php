@@ -119,42 +119,42 @@ function analyzeImageWithVisionAPI($imageBase64) {
 
 function extractVisualFeatures($visionData) {
     $features = [];
-    $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
+    $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis', 'black spot', 'fungus', 'necrosis'];
 
-    // 1. Pathology-focused labels
+    $hasDamageIndicators = false;
+
+    // 1. Label-based disease keywords
     foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
-        if ($label['score'] > 0.85 && hasDiseaseKeyword($label['description'], $diseaseKeywords)) {
-            $features[] = $label['description'];
+        $desc = strtolower($label['description']);
+        if ($label['score'] > 0.8 && hasDiseaseKeyword($desc, $diseaseKeywords)) {
+            $features[] = ucfirst($desc);
+            $hasDamageIndicators = true;
         }
     }
 
-    // 2. Precise object locations
-    foreach ($visionData['responses'][0]['localizedObjectAnnotations'] ?? [] as $obj) {
-        if ($obj['score'] > 0.8) {
-            $position = $obj['boundingPoly']['normalizedVertices'][0] ?? null;
-            $loc = $position ? sprintf("(%.0f%%,%.0f%%)", $position['x']*100, $position['y']*100) : "";
-            $features[] = "{$obj['name']} $loc";
-        }
-    }
-
-    // 3. Color analysis with HEX codes
-    foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
-        if ($color['pixelFraction'] > 0.1) {
-            $rgb = $color['color'];
-            $hex = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
-            $features[] = "Culoare: $hex";
-        }
-    }
-
-    // 4. Web context filtering
+    // 2. Web context
     foreach ($visionData['responses'][0]['webDetection']['webEntities'] ?? [] as $entity) {
-        if (($entity['score'] ?? 0) > 0.7 && hasDiseaseKeyword($entity['description'] ?? '', $diseaseKeywords)) {
-            $features[] = "Context: " . substr($entity['description'], 0, 50);
+        $desc = strtolower($entity['description'] ?? '');
+        if (($entity['score'] ?? 0) > 0.7 && hasDiseaseKeyword($desc, $diseaseKeywords)) {
+            $features[] = "Web context: " . ucfirst($desc);
+            $hasDamageIndicators = true;
+        }
+    }
+
+    // 3. Add color hints only if no damage detected
+    if (!$hasDamageIndicators) {
+        foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
+            if ($color['pixelFraction'] > 0.1) {
+                $rgb = $color['color'];
+                $hex = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
+                $features[] = "Culoare: $hex";
+            }
         }
     }
 
     return array_unique($features);
 }
+
 
 function hasDiseaseKeyword($text, $keywords) {
     return preg_match('/(' . implode('|', $keywords) . ')/i', $text);
@@ -216,8 +216,7 @@ function getGPTResponse($prompt) {
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o',
             'messages' => [
-                ['role' => 'system', 'content' => 'Ești un expert agronom. Răspunsurile sunt concise, în română.'],
-                ['role' => 'user', 'content' => $prompt]
+                ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.']
             ],
             'temperature' => 0.2,
             'max_tokens' => 600
@@ -232,15 +231,17 @@ function getGPTResponse($prompt) {
 }
 
 function formatResponse($text) {
-    // Convert XML-like tags to Markdown
-    $text = str_replace(['<observații>', '</observații>'], "🔎 **Observații**\n", $text);
-    $text = str_replace(['<cauze>', '</cauze>'], "\n🦠 **Cauze probabile**\n", $text);
-    $text = str_replace(['<tratament>', '</tratament>'], "\n💊 **Tratament**\n", $text);
-    $text = str_replace(['<monitorizare>', '</monitorizare>'], "\n👀 **Recomandări**\n", $text);
-    $text = str_replace(['<neclar>', '</neclar>'], "\n❓ **Necesită verificare**\n", $text);
-    
-    return preg_replace('/•/', '•', $text); // Ensure consistent bullets
+    // Replace tag headers with emoji-only headers (no markdown)
+    $text = str_replace(['<observații>', '</observații>'], "🔎 Observații\n", $text);
+    $text = str_replace(['<cauze>', '</cauze>'], "\n🦠 Cauze probabile\n", $text);
+    $text = str_replace(['<tratament>', '</tratament>'], "\n💊 Tratament\n", $text);
+    $text = str_replace(['<monitorizare>', '</monitorizare>'], "\n👀 Recomandări\n", $text);
+    $text = str_replace(['<neclar>', '</neclar>'], "\n❓ Necesită verificare\n", $text);
+
+    // Remove any leftover bold asterisks
+    return str_replace(['**', '•'], ['', '•'], $text);
 }
+
 
 function logSuccess() {
     error_log("Processing completed successfully");
