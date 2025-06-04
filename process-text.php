@@ -2,28 +2,29 @@
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 
-// --- ENVIRONMENT VARIABLES (Render.com) ---
+// --- Environment Variables ---
 $apiSecretKey = getenv('API_SECRET_KEY');
+$googleVisionKey = getenv('GOOGLE_VISION_KEY');
+$openaiKey = getenv('OPENAI_API_KEY');
 $dbHost = getenv('DB_HOST');
 $dbUser = getenv('DB_USER');
 $dbPass = getenv('DB_PASS');
 $dbName = getenv('DB_NAME');
-$openaiKey = getenv('OPENAI_API_KEY');
 $redisHost = getenv('REDIS_HOST');
 $redisPort = getenv('REDIS_PORT');
 $redisPass = getenv('REDIS_PASSWORD');
 
-// --- API Key Check ---
+// --- Security Check ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 if ($apiKey !== $apiSecretKey) {
     http_response_code(401);
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
 }
 
-// --- Early IP Rate Limiter (Redis) ---
+// --- Redis Rate Limiter ---
 try {
     if ($redisHost && $redisPort) {
         $redis = new Redis();
@@ -33,10 +34,9 @@ try {
         $clientIp = $_SERVER['REMOTE_ADDR'];
         $ipKey = "ip_limit:$clientIp";
         
-        // Allow 20 requests/minute per IP
         if ($redis->exists($ipKey) && $redis->get($ipKey) >= 20) {
             http_response_code(429);
-            die(json_encode(['success' => false, 'error' => 'Prea multe solicitări de la această rețea']));
+            die(json_encode(['success' => false, 'error' => 'Prea multe solicitări']));
         }
         
         $redis->multi()
@@ -45,11 +45,10 @@ try {
             ->exec();
     }
 } catch (Exception $e) {
-    error_log("Redis connection failed: " . $e->getMessage());
-    // Continue processing if Redis is unavailable
+    error_log("Redis error: " . $e->getMessage());
 }
 
-// --- Connect to DB (using env vars) ---
+// --- Database Connection ---
 try {
     $pdo = new PDO(
         "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4",
@@ -58,7 +57,7 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 } catch (Exception $e) {
-    error_log("DB connect error: " . $e->getMessage());
+    error_log("DB error: " . $e->getMessage());
     http_response_code(500);
     die(json_encode(['success' => false, 'error' => 'Service unavailable']));
 }
@@ -67,70 +66,37 @@ try {
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
 
-    if (!$data || !isset($data['message']) || !isset($data['device_hash'])) {
-        throw new Exception('Date lipsă: Mesajul sau hash-ul dispozitivului nu au fost primite');
-    }
+    // --- Image Processing ---
+    if (isset($data['image'])) {
+        $imageBase64 = $data['image'];
+        $userMessage = $data['message'] ?? '';
+        $deviceHash = $data['device_hash'] ?? '';
 
-    $message = trim($data['message']);
-    $deviceHash = $data['device_hash'];
+        validateImage($imageBase64);
+        validateDeviceHash($deviceHash);
+        trackUsage($pdo, $deviceHash, 'image');
+        
+        $rawResponse = processImage($imageBase64, $userMessage);
 
-    // --- Device Hash Validation ---
-    if (!preg_match('/^[a-zA-Z0-9_-]{8,64}$/', $deviceHash)) {
-        throw new Exception('Hash dispozitiv invalid');
-    }
+    // --- Text Processing ---
+    } elseif (isset($data['message'], $data['device_hash'])) {
+        $message = trim($data['message']);
+        $deviceHash = $data['device_hash'];
 
-    // --- Validate Input ---
-    validateTextInput($message);
-    securityScanText($message);
+        validateTextInput($message);
+        validateDeviceHash($deviceHash);
+        trackUsage($pdo, $deviceHash, 'text');
+        
+        $rawResponse = processText($message);
 
-    // --- RATE LIMITING (per device_hash) ---
-    $maxDaily = 50;     // Max questions/day/device
-    $maxMinute = 5;     // Max questions/minute/device
-
-    // Get today's date
-    $today = date('Y-m-d');
-
-    // Try to fetch usage row
-    $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
-    $stmt->execute([$deviceHash, $today]);
-    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    $now = date('Y-m-d H:i:s');
-
-    if ($usage) {
-        // Daily quota
-        if ($usage['text_count'] >= $maxDaily) {
-            http_response_code(429);
-            die(json_encode(['success' => false, 'error' => 'Ați depășit limita zilnică de întrebări']));
-        }
-        // Burst limit
-        $lastRequest = strtotime($usage['last_request']);
-        if (time() - $lastRequest < 60) {
-            // Same minute, increment minute_counter
-            $minuteCounter = $usage['minute_counter'] + 1;
-            if ($minuteCounter > $maxMinute) {
-                http_response_code(429);
-                die(json_encode(['success' => false, 'error' => 'Prea multe solicitări. Așteptați un minut.']));
-            }
-        } else {
-            // New minute, reset minute_counter
-            $minuteCounter = 1;
-        }
-        // Update usage row
-        $stmt = $pdo->prepare("UPDATE usage_tracking SET text_count = text_count + 1, last_request = ?, minute_counter = ? WHERE id = ?");
-        $stmt->execute([$now, $minuteCounter, $usage['id']]);
     } else {
-        // First request today for this device
-        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, text_count, image_count, premium, extra_questions, created_at, last_request, minute_counter) VALUES (?, ?, 1, 0, 0, 0, ?, ?, 1)");
-        $stmt->execute([$deviceHash, $today, $now, $now]);
+        throw new Exception('Cerere invalidă');
     }
-
-    // --- Get AI Response ---
-    $response = getAIResponse($message, $openaiKey);
 
     echo json_encode([
         'success' => true,
-        'response' => $response
+        'display' => formatForDisplay($rawResponse),
+        'tts' => cleanForTTS($rawResponse)
     ]);
 
 } catch (Exception $e) {
@@ -142,68 +108,189 @@ try {
     ]);
 }
 
-// --- Helper Functions ---
+// ====================
+// PROCESSING FUNCTIONS
+// ====================
 
-function validateTextInput($message) {
-    if (empty($message)) {
-        throw new Exception('Mesajul nu poate fi gol');
-    }
-    if (strlen($message) > 2000) {
-        throw new Exception('Mesajul este prea lung');
-    }
+function processImage($imageBase64, $userMessage) {
+    $visionData = analyzeImageWithVisionAPI($imageBase64);
+    $features = extractVisualFeatures($visionData);
+    $prompt = buildImagePrompt($features, $userMessage);
+    return getGPTResponse($prompt, true);
 }
 
-function securityScanText($message) {
-    $patterns = [
-        '/select.*from/i', '/insert.*into/i', '/update.*set/i', '/delete.*from/i',
-        '/<script/i', '/javascript:/i', '/eval\(/i', '/exec\(/i', '/system\(/i'
+function processText($message) {
+    $systemPrompt = <<<PROMPT
+Ești un expert grădinar. Structurează răspunsurile exact astfel:
+
+**Observații:**
+• Maxim 3 puncte cheie
+
+**Cauze posibile:**
+1. [Principală] (70-90%)
+2. [Secundară] (10-30%)
+
+**Recomandări:**
+• Pas 1: Acțiune concretă
+• Pas 2: Produs specific
+
+**Monitorizare:**
+✓ Verificați [indicator]
+✗ Evitați [acțiune]
+
+Folosește doar structura de mai sus. Fără markdown.
+PROMPT;
+
+    return getGPTResponse("$systemPrompt\n\nUtilizator: $message", false);
+}
+
+// ====================
+// CORE FUNCTIONALITY
+// ====================
+
+function analyzeImageWithVisionAPI($imageBase64) {
+    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
+    
+    $requestData = [
+        'requests' => [[
+            'image' => ['content' => $imageBase64],
+            'features' => [
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
+                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
+                ['type' => 'WEB_DETECTION', 'maxResults' => 10],
+                ['type' => 'IMAGE_PROPERTIES']
+            ]
+        ]]
     ];
-    foreach ($patterns as $pattern) {
-        if (preg_match($pattern, strtolower($message))) {
-            throw new Exception('Mesajul conține conținut suspect. Reformulați.');
+
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST",
+            'content' => json_encode($requestData)
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $response = file_get_contents($url, false, $context);
+    
+    if ($response === FALSE) {
+        throw new Exception('Eroare analiză imagine');
+    }
+    
+    return json_decode($response, true);
+}
+
+function extractVisualFeatures($visionData) {
+    $features = [];
+    $keywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
+
+    foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
+        if ($label['score'] > 0.8 && preg_match('/(' . implode('|', $keywords) . ')/i', $label['description'])) {
+            $features[] = $label['description'];
         }
     }
+
+    foreach ($visionData['responses'][0]['webDetection']['webEntities'] ?? [] as $entity) {
+        if (($entity['score'] ?? 0) > 0.7 && preg_match('/(' . implode('|', $keywords) . ')/i', $entity['description'] ?? '')) {
+            $features[] = "Context web: " . substr($entity['description'], 0, 50);
+        }
+    }
+
+    return array_unique($features);
 }
 
-function getAIResponse($message, $openaiKey) {
-    $systemPrompt = "Ești un grădinar român cu peste 30 de ani de experiență practică în grădinărit. Răspunzi întotdeauna în limba română, clar, simplu și prietenos, ca pentru o persoană începătoare sau în vârstă. Nu folosești termeni tehnici inutili. Oferi soluții directe, bazate pe experiență reală, explicate în 150–300 de cuvinte. Nu menționezi AI, roboți sau modele de limbaj. Nu încurajezi căutări pe Google sau consultarea altor surse.";
-
+function getGPTResponse($prompt, $isImage) {
+    $model = $isImage ? 'gpt-4o' : 'gpt-4-turbo';
+    
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json',
-        'Authorization: Bearer ' . $openaiKey
-    ]);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-        'model' => 'gpt-4o-mini',
-        'messages' => [
-            ['role' => 'system', 'content' => $systemPrompt],
-            ['role' => 'user', 'content' => $message]
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
         ],
-        'max_tokens' => 500,
-        'temperature' => 0.7
-    ]));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        CURLOPT_POSTFIELDS => json_encode([
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => 'Răspunsuri structurate, fără markdown.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'temperature' => $isImage ? 0.2 : 0.4,
+            'max_tokens' => 600
+        ])
+    ]);
 
     $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($httpCode !== 200) {
-        throw new Exception('Nu am putut genera răspuns');
-    }
-
+    if (!$response) throw new Exception('Eroare AI');
+    
     $data = json_decode($response, true);
-    if (!isset($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI');
-    }
+    return $data['choices'][0]['message']['content'];
+}
 
-    return cleanForTTS($data['choices'][0]['message']['content']);
+// ====================
+// RESPONSE FORMATTING
+// ====================
+
+function formatForDisplay($text) {
+    return str_replace(
+        ['**Observații:**', '**Cauze posibile:**', '**Recomandări:**', '**Monitorizare:**', '•'],
+        ["🔍 Observații\n", "🦠 Cauze posibile\n", "💡 Recomandări\n", "👀 Monitorizare\n", "• "],
+        $text
+    );
 }
 
 function cleanForTTS($text) {
-    $text = preg_replace('/\*+/', '', $text);
-    $text = preg_replace('/^\d+\.\s*/m', '', $text);
-    $text = preg_replace('/\s+/', ' ', $text);
-    return trim($text);
+    return preg_replace([
+        '/\*\*.*?:\*\*/',
+        '/•/',
+        '/\d+\./',
+        '/\n/'
+    ], [
+        '',
+        '. ',
+        '. Pasul următor: ',
+        '. '
+    ], $text);
+}
+
+// ====================
+// VALIDATION & HELPERS
+// ====================
+
+function validateImage($base64) {
+    if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
+        throw new Exception('Imagine invalidă');
+    }
+}
+
+function validateTextInput($message) {
+    if (empty($message) || strlen($message) > 2000) {
+        throw new Exception('Mesaj invalid');
+    }
+}
+
+function validateDeviceHash($hash) {
+    if (!preg_match('/^[a-zA-Z0-9_-]{8,64}$/', $hash)) {
+        throw new Exception('Dispozitiv invalid');
+    }
+}
+
+function trackUsage($pdo, $deviceHash, $type) {
+    $today = date('Y-m-d');
+    $now = date('Y-m-d H:i:s');
+
+    $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
+    $stmt->execute([$deviceHash, $today]);
+    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($usage) {
+        $field = ($type === 'image') ? 'image_count' : 'text_count';
+        $stmt = $pdo->prepare("UPDATE usage_tracking SET $field = $field + 1, last_request = ? WHERE id = ?");
+        $stmt->execute([$now, $usage['id']]);
+    } else {
+        $fields = ($type === 'image') ? 'image_count' : 'text_count';
+        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $fields, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
+        $stmt->execute([$deviceHash, $today, $now, $now]);
+    }
 }
