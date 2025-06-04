@@ -166,7 +166,7 @@ function analyzeImageWithVisionAPI($imageBase64) {
     $options = [
         'http' => [
             'header'  => "Content-type: application/json\r\n",
-            'method'  => 'POST",
+            'method'  => 'POST',
             'content' => json_encode($requestData)
         ]
     ];
@@ -201,8 +201,7 @@ function extractVisualFeatures($visionData) {
 }
 
 function getGPTResponse($prompt, $isImage) {
-    $model = $isImage ? 'gpt-4o' : 'gpt-4-turbo';
-    
+    $model = $isImage ? 'gpt-4o-mini' : 'gpt-4o-mini'; // For text too, since you're sticking to mini for efficiency.
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -228,31 +227,30 @@ function getGPTResponse($prompt, $isImage) {
     return $data['choices'][0]['message']['content'];
 }
 
+
 // ====================
 // RESPONSE FORMATTING
 // ====================
 
 function formatForDisplay($text) {
-    return str_replace(
-        ['**Observații:**', '**Cauze posibile:**', '**Recomandări:**', '**Monitorizare:**', '•'],
-        ["🔍 Observații\n", "🦠 Cauze posibile\n", "💡 Recomandări\n", "👀 Monitorizare\n", "• "],
-        $text
-    );
+    $text = preg_replace('/\*\*Observații:\*\*/', "🔍 Observații\n", $text);
+    $text = preg_replace('/\*\*Cauze posibile:\*\*/', "🦠 Cauze posibile\n", $text);
+    $text = preg_replace('/\*\*Recomandări:\*\*/', "💡 Recomandări\n", $text);
+    $text = preg_replace('/\*\*Monitorizare:\*\*/', "👀 Monitorizare\n", $text);
+    return str_replace('•', "• ", $text);
 }
 
+
 function cleanForTTS($text) {
-    return preg_replace([
-        '/\*\*.*?:\*\*/',
-        '/•/',
-        '/\d+\./',
-        '/\n/'
-    ], [
-        '',
-        '. ',
-        '. Pasul următor: ',
-        '. '
-    ], $text);
+    $text = strip_tags($text);
+    $text = preg_replace('/\*\*.*?\*\*/', '', $text); // Remove any bold
+    $text = preg_replace('/[\n\r]+/', '. ', $text); // New lines to periods
+    $text = preg_replace('/•\s*/', '', $text); // Remove bullet points
+    $text = preg_replace('/\d+\.\s*/', '', $text); // Remove numbering
+    $text = preg_replace('/\s+/', ' ', $text); // Normalize spaces
+    return trim($text);
 }
+
 
 // ====================
 // VALIDATION & HELPERS
