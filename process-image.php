@@ -32,12 +32,13 @@ try {
     }
 
     $imageBase64 = $data['image'];
+    $userMessage = isset($data['message']) ? $data['message'] : '';
 
     // Validate Image
     validateImage($imageBase64);
 
     // Get AI Treatment
-    $treatment = getAITreatment($imageBase64);
+    $treatment = getAITreatment($imageBase64, $userMessage);
 
     // Response
     echo json_encode([
@@ -107,10 +108,10 @@ function validateImage(&$imageBase64) {
 }
 
 // ==============================================
-// AI PROCESSING WITH PLANT DETECTION
+// AI PROCESSING WITH IMPROVED PLANT DETECTION
 // ==============================================
 
-function getAITreatment($imageBase64) {
+function getAITreatment($imageBase64, $userMessage = '') {
     $googleVisionKey = getenv('GOOGLE_VISION_KEY');
     $openaiKey = getenv('OPENAI_API_KEY');
 
@@ -122,7 +123,7 @@ function getAITreatment($imageBase64) {
     $visionResults = analyzeImageWithVisionAPI($imageBase64, $googleVisionKey);
 
     // Prepare prompt for OpenAI
-    $prompt = buildPromptFromVisionResults($visionResults);
+    $prompt = buildPromptFromVisionResults($visionResults, $userMessage);
 
     // Call OpenAI
     $aiResponse = getOpenAIResponse($prompt, $openaiKey);
@@ -160,25 +161,27 @@ function analyzeImageWithVisionAPI($imageBase64, $googleVisionKey) {
     return json_decode($response, true);
 }
 
-function buildPromptFromVisionResults($visionResults) {
+function buildPromptFromVisionResults($visionResults, $userMessage = '') {
     $labels = [];
-    $plantKeywords = ['plant', 'leaf', 'flower', 'tree', 'grass', 'foliage', 'vegetation', 
-                     'botanical', 'garden', 'herb', 'shrub', 'branch', 'petal', 'stem', 
-                     'roots', 'soil', 'pot', 'gardening', 'chlorosis', 'fungus', 'pest'];
-    $nonPlantKeywords = ['animal', 'cat', 'dog', 'person', 'human', 'car', 'building', 
-                        'screen', 'television', 'computer', 'minecraft', 'game', 'indoor', 
-                        'furniture', 'electronic', 'device', 'logo', 'text', 'paper'];
-
     if (isset($visionResults['responses'][0]['labelAnnotations'])) {
         foreach ($visionResults['responses'][0]['labelAnnotations'] as $label) {
             $labels[] = strtolower($label['description']);
         }
     }
 
+    // Plant and disease-related keywords
+    $plantKeywords = [
+        'plant', 'leaf', 'foliage', 'stem', 'root', 'flower', 'tree', 
+        'shrub', 'vegetation', 'garden', 'petal', 'chlorosis', 'fungus',
+        'spot', 'wilt', 'blight', 'mold', 'mildew', 'rot', 'insect', 'pest'
+    ];
+    $nonPlantKeywords = [
+        'animal', 'cat', 'dog', 'person', 'human', 'car', 'building', 'screen', 
+        'television', 'computer', 'minecraft', 'game', 'indoor', 'furniture', 'electronic', 'device', 'logo', 'text', 'paper'
+    ];
+
     // Plant detection logic
     $hasPlant = false;
-    $hasNonPlant = false;
-    
     foreach ($labels as $label) {
         foreach ($plantKeywords as $keyword) {
             if (strpos($label, $keyword) !== false) {
@@ -187,35 +190,40 @@ function buildPromptFromVisionResults($visionResults) {
             }
         }
     }
-    
+
+    $hasDominantNonPlant = false;
     foreach ($labels as $label) {
         foreach ($nonPlantKeywords as $keyword) {
             if (strpos($label, $keyword) !== false) {
-                $hasNonPlant = true;
+                $hasDominantNonPlant = true;
                 break 2;
             }
         }
     }
 
-    if (!$hasPlant) {
-        throw new Exception('Imaginea nu conține o plantă clară. Te rog să fotografiezi o plantă de grădină.');
-    }
-    
-    if ($hasNonPlant) {
+    // Only reject if there are NO plant labels and there ARE non-plant labels
+    if (!$hasPlant && $hasDominantNonPlant) {
         throw new Exception('Imaginea conține elemente care nu sunt plante. Te rog să focalizezi pe planta cu problema.');
     }
+    if (!$hasPlant) {
+        throw new Exception('Imaginea nu pare să conțină o plantă. Te rog să fotografiezi clar o frunză sau o parte a unei plante.');
+    }
 
-    $prompt = "Analizează această imagine cu următoarele elemente: " . implode(', ', $labels) . ". ";
-    $prompt .= "Oferă un tratament concis în română (150-250 cuvinte) pentru problema identificată. ";
-    $prompt .= "Dacă nu vezi probleme evidente, răspunde: 'Planta pare sănătoasă. Pentru sfaturi generale, trimite o întrebare text.'";
+    // Compose prompt for OpenAI
+    $prompt = "Imaginea conține: " . implode(', ', $labels) . ". ";
+    if (!empty($userMessage)) {
+        $prompt .= "Utilizatorul a întrebat: \"$userMessage\". ";
+    }
+    $prompt .= "Dacă observi pete, decolorări, găuri sau alte simptome pe frunze, rădăcini sau tulpină, descrie posibilele cauze și oferă un tratament pentru grădinărit. Dacă nu vezi probleme, explică ce simptome ar trebui urmărite și cum arată o plantă sănătoasă.";
 
     return $prompt;
 }
 
 function getOpenAIResponse($prompt, $openaiKey) {
-    $systemPrompt = "Ești un expert în grădinărit. Răspunde DOAR la întrebări legate de plante. 
-    Dacă imaginea nu conține plante sau problema nu este clară, răspunde: 
-    'Nu pot oferi sfaturi pentru această imagine. Te rog să încerci cu o poză clară a unei plante cu semne de bolă sau dăunători.'";
+    $systemPrompt = "Ești un expert în boli ale plantelor. Analizează etichetele generate pentru imagine și: 
+    1. Identifică posibile boli sau dăunători bazându-te pe elemente precum pete, decolorări, găuri, mucegai, insecte, etc.
+    2. Dacă nu vezi probleme evidente, sugerează ce simptome ar trebui căutate și cum arată o plantă sănătoasă.
+    3. Răspunde în română, clar și concis (150-250 cuvinte).";
 
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
