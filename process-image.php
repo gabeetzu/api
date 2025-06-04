@@ -33,6 +33,11 @@ try {
         $imageBase64 = $data['image'] ?? '';
         $userMessage = sanitizeInput($data['message'] ?? '');
     } elseif (isset($_FILES['image'])) {
+        $allowedTypes = ['image/jpeg', 'image/png'];
+if (!in_array($_FILES['image']['type'], $allowedTypes)) {
+    throw new Exception('Imagine neacceptată. Folosiți JPG sau PNG.');
+}
+
         $imageData = file_get_contents($_FILES['image']['tmp_name']);
         $imageBase64 = base64_encode($imageData);
         $userMessage = isset($_POST['message']) ? sanitizeInput($_POST['message']) : '';
@@ -45,14 +50,16 @@ try {
     }
 
     validateImage($imageBase64);
-    $treatment = getAITreatment($imageBase64, $userMessage);
+$treatment = getAITreatment($imageBase64, $userMessage);
 
-    logSuccess();
-    echo json_encode([
-        'success' => true,
-        'response_id' => bin2hex(random_bytes(6)),
-        'response' => $treatment
-    ]);
+logSuccess();
+echo json_encode([
+    'success' => true,
+    'response_id' => bin2hex(random_bytes(6)),
+    'response' => [
+        'text' => $treatment  // This wraps the plain text response into an object
+    ]
+]);
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
@@ -69,7 +76,7 @@ function validateImage(&$imageBase64) {
     if (strlen($imageBase64) > 5 * 1024 * 1024) {
         throw new Exception('Imagine prea mare');
     }
-    if (!preg_match('/^[a-zA-Z0-9\/\r\n+]*={0,2}$/', $imageBase64)) {
+    if (!preg_match('/^[a-zA-Z0-9\/+\s=]+$/', $imageBase64)) {
         throw new Exception('Imagine invalidă');
     }
 }
@@ -77,11 +84,10 @@ function validateImage(&$imageBase64) {
 function getAITreatment($imageBase64, $userMessage) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
-    
-    $hasSymptoms = count($features) > 0 
-    && !preg_grep('/^Culori dominante:/', $features)
-    && !preg_grep('/nu a fost clasificată/i', $features);
 
+    $hasSymptoms = count($features) > 0 
+        && !preg_grep('/^Culori dominante:/', $features)
+        && !preg_grep('/nu a fost clasificată/i', $features);
 
     $prompt = $hasSymptoms 
         ? buildExpertPrompt($features, $userMessage)
@@ -90,40 +96,7 @@ function getAITreatment($imageBase64, $userMessage) {
     return getGPTResponse($prompt);
 }
 
-
-function analyzeImageWithVisionAPI($imageBase64) {
-    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
-    $requestData = [
-        'requests' => [[
-            'image' => ['content' => $imageBase64],
-            'features' => [
-                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
-                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
-                ['type' => 'WEB_DETECTION', 'maxResults' => 10],
-                ['type' => 'IMAGE_PROPERTIES']
-            ]
-        ]]
-    ];
-
-    $options = [
-        'http' => [
-            'header' => "Content-type: application/json\r\n",
-            'method' => 'POST',
-            'content' => json_encode($requestData)
-        ]
-    ];
-
-    $context = stream_context_create($options);
-    $response = file_get_contents($url, false, $context);
-
-    if ($response === FALSE) {
-        throw new Exception('Eroare la analiza imaginii (Google Vision)');
-    }
-
-    return json_decode($response, true);
-}
-
-function extractVisualFeatures($visionData, $imageBase64) {
+function extractVisualFeatures($visionData) {
     $features = [];
     $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis', 'black spot', 'fungus', 'necrosis'];
     $hasDamageIndicators = false;
@@ -168,6 +141,7 @@ function extractVisualFeatures($visionData, $imageBase64) {
 
     return array_unique($features);
 }
+
 
 function hasDiseaseKeyword($text, $keywords) {
     return preg_match('/(' . implode('|', $keywords) . ')/i', $text);
@@ -239,6 +213,7 @@ PROMPT;
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
+        CURLOPT_TIMEOUT => 30,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: application/json',
@@ -259,7 +234,11 @@ function getGPTResponse($prompt) {
     if (!$response) throw new Exception('Eroare OpenAI');
 
     $data = json_decode($response, true);
-    return formatResponse($data['choices'][0]['message']['content']);
+if (!isset($data['choices'][0]['message']['content'])) {
+    throw new Exception('Răspuns invalid de la OpenAI');
+}
+return formatResponse($data['choices'][0]['message']['content']);
+
 }
 
 function formatResponse($text) {
