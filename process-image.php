@@ -22,12 +22,10 @@ if ($apiKey !== $expectedKey) {
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
 }
 
-// --- Config ---
 ini_set('max_execution_time', '60');
 ini_set('memory_limit', '512M');
 
 try {
-    // Accept both JSON and form-data
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'application/json') !== false) {
         $input = file_get_contents('php://input');
@@ -62,15 +60,13 @@ try {
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
 
-// --- Helper Functions ---
 function sanitizeInput($text) {
     $clean = strip_tags(trim($text));
     return mb_substr($clean, 0, 300);
 }
 
 function validateImage(&$imageBase64) {
-    // Basic validation: check if base64 string is valid and not too large
-    if (strlen($imageBase64) > 5 * 1024 * 1024) { // 5MB limit
+    if (strlen($imageBase64) > 5 * 1024 * 1024) {
         throw new Exception('Imagine prea mare');
     }
     if (!preg_match('/^[a-zA-Z0-9\/\r\n+]*={0,2}$/', $imageBase64)) {
@@ -80,14 +76,13 @@ function validateImage(&$imageBase64) {
 
 function getAITreatment($imageBase64, $userMessage) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
-    $features = extractVisualFeatures($visionData);
+    $features = extractVisualFeatures($visionData, $imageBase64);
     $prompt = buildExpertPrompt($features, $userMessage);
     return getGPTResponse($prompt);
 }
 
 function analyzeImageWithVisionAPI($imageBase64) {
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
-    
     $requestData = [
         'requests' => [[
             'image' => ['content' => $imageBase64],
@@ -102,29 +97,28 @@ function analyzeImageWithVisionAPI($imageBase64) {
 
     $options = [
         'http' => [
-            'header'  => "Content-type: application/json\r\n",
-            'method'  => 'POST',
+            'header' => "Content-type: application/json\r\n",
+            'method' => 'POST',
             'content' => json_encode($requestData)
         ]
     ];
-    
+
     $context = stream_context_create($options);
     $response = file_get_contents($url, false, $context);
-    
+
     if ($response === FALSE) {
         throw new Exception('Eroare la analiza imaginii (Google Vision)');
     }
-    
+
     return json_decode($response, true);
 }
 
-function extractVisualFeatures($visionData) {
+function extractVisualFeatures($visionData, $imageBase64) {
     $features = [];
     $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis', 'black spot', 'fungus', 'necrosis'];
-
     $hasDamageIndicators = false;
+    $dominantColors = [];
 
-    // 1. Label-based disease keywords
     foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
         $desc = strtolower($label['description']);
         if ($label['score'] > 0.8 && hasDiseaseKeyword($desc, $diseaseKeywords)) {
@@ -133,7 +127,6 @@ function extractVisualFeatures($visionData) {
         }
     }
 
-    // 2. Web context
     foreach ($visionData['responses'][0]['webDetection']['webEntities'] ?? [] as $entity) {
         $desc = strtolower($entity['description'] ?? '');
         if (($entity['score'] ?? 0) > 0.7 && hasDiseaseKeyword($desc, $diseaseKeywords)) {
@@ -142,20 +135,29 @@ function extractVisualFeatures($visionData) {
         }
     }
 
-    // 3. Add color hints only if no damage detected
-    if (!$hasDamageIndicators) {
-        foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
-            if ($color['pixelFraction'] > 0.1) {
-                $rgb = $color['color'];
-                $hex = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
-                $features[] = "Culoare: $hex";
-            }
+    foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
+        if ($color['pixelFraction'] > 0.05) {
+            $rgb = $color['color'];
+            $hex = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
+            $dominantColors[] = $hex;
         }
+    }
+
+    if (!$hasDamageIndicators && !empty($dominantColors)) {
+        $joined = implode(', ', $dominantColors);
+        $features[] = "Culori dominante: $joined";
+
+        if (preg_grep('/^#(6[0-9a-f]{2}|7[0-9a-f]{2})00$/i', $dominantColors) || count(preg_grep('/^#(8|9|a)[0-9a-f]{5}$/i', $dominantColors)) > 1) {
+            $features[] = "⚠️ Observație generală: culori neobișnuite sau pete maronii";
+        }
+    }
+
+    if (empty($features)) {
+        $features[] = "⚠️ Imaginea nu a fost clasificată automat ca boală, dar frunza arată anormal (culoare, textură, pete etc).";
     }
 
     return array_unique($features);
 }
-
 
 function hasDiseaseKeyword($text, $keywords) {
     return preg_match('/(' . implode('|', $keywords) . ')/i', $text);
@@ -172,6 +174,8 @@ function buildExpertPrompt($features, $userMessage) {
 **Simptome observate:**
 $formattedFeatures
 **Întrebare utilizator:** "$userMessage"
+
+Chiar dacă clasificarea automată nu a identificat o boală clară, imaginea poate conține semne vizuale de deteriorare. Analizează logic și oferă o opinie estimativă.
 
 **Analiză:**
 1. Descrie simptome cheie (max 3)
@@ -216,11 +220,10 @@ function getGPTResponse($prompt) {
         ],
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o',
-'messages' => [
-    ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.'],
-    ['role' => 'user', 'content' => $prompt]
-],
-
+            'messages' => [
+                ['role' => 'system', 'content' => 'Ești un expert agronom român, cu 30 de ani de experiență practică. Explici simplu, în română, ca pentru un om în vârstă, fără termeni tehnici.'],
+                ['role' => 'user', 'content' => $prompt]
+            ],
             'temperature' => 0.2,
             'max_tokens' => 600
         ])
@@ -234,21 +237,17 @@ function getGPTResponse($prompt) {
 }
 
 function formatResponse($text) {
-    // Replace tag headers with emoji-only headers (no markdown)
     $text = str_replace(['<observații>', '</observații>'], "🔎 Observații\n", $text);
     $text = str_replace(['<cauze>', '</cauze>'], "\n🦠 Cauze probabile\n", $text);
     $text = str_replace(['<tratament>', '</tratament>'], "\n💊 Tratament\n", $text);
     $text = str_replace(['<monitorizare>', '</monitorizare>'], "\n👀 Recomandări\n", $text);
     $text = str_replace(['<neclar>', '</neclar>'], "\n❓ Necesită verificare\n", $text);
-
-    // Remove any leftover bold asterisks
     return str_replace(['**', '•'], ['', '•'], $text);
 }
 
-
 function logSuccess() {
     error_log("Processing completed successfully");
-    if (rand(1, 100) > 95) { // Sample 5% of requests
+    if (rand(1, 100) > 95) {
         error_log("Sample successful request details");
     }
 }
