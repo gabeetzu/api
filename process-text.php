@@ -94,10 +94,13 @@ try {
     }
 
     echo json_encode([
-        'success' => true,
+    'success' => true,
+    'response' => [
         'display' => formatForDisplay($rawResponse),
         'tts' => cleanForTTS($rawResponse)
-    ]);
+    ]
+]);
+
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
