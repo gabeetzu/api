@@ -8,6 +8,7 @@ header('Access-Control-Allow-Headers: Content-Type');
 // Enhanced Logging
 error_log("=== IMAGE PROCESSING START ===");
 error_log("API_SECRET_KEY exists: " . (getenv('API_SECRET_KEY') ? 'YES' : 'NO'));
+error_log("GOOGLE_VISION_KEY exists: " . (getenv('GOOGLE_VISION_KEY') ? 'YES' : 'NO'));
 
 // API Key Check
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
@@ -20,84 +21,29 @@ if ($apiKey !== $expectedKey) {
 
 // Performance Configuration
 ini_set('max_execution_time', '60');
-ini_set('memory_limit', '512M');  // Increased for image processing
+ini_set('memory_limit', '512M');
 
 try {
-    // Database Connection
-    $pdo = new PDO(
-        "mysql:host=" . getenv('DB_HOST') . ";dbname=" . getenv('DB_NAME') . ";charset=utf8mb4",
-        getenv('DB_USER'),
-        getenv('DB_PASS'),
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-    );
-
     $input = file_get_contents('php://input');
     $data = json_decode($input, true);
 
-    if (!$data || !isset($data['image']) || !isset($data['device_hash'])) {
-        throw new Exception('Date lipsă: Imaginea sau hash-ul dispozitivului nu au fost primite');
+    if (!$data || !isset($data['image'])) {
+        throw new Exception('Date lipsă: Imaginea nu a fost primită');
     }
 
     $imageBase64 = $data['image'];
-    $deviceHash = $data['device_hash'];
 
-    // --- Rate Limiting ---
-    $maxDailyImages = 5;    // Max 5 images/day/device
-    $maxMinuteImages = 2;   // Max 2 images/minute/device
-    $today = date('Y-m-d');
-
-    // Check existing usage
-    $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
-    $stmt->execute([$deviceHash, $today]);
-    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    $now = date('Y-m-d H:i:s');
-
-    if ($usage) {
-        // Daily limit
-        if ($usage['image_count'] >= $maxDailyImages) {
-            throw new Exception('Ați depășit limita zilnică de analize foto');
-        }
-        
-        // Burst limit
-        $lastImageTime = strtotime($usage['last_image_request']);
-        if (time() - $lastImageTime < 60) {
-            if ($usage['image_minute_counter'] >= $maxMinuteImages) {
-                throw new Exception('Prea multe analize foto. Încercați din nou peste 1 minut.');
-            }
-            $newMinuteCounter = $usage['image_minute_counter'] + 1;
-        } else {
-            $newMinuteCounter = 1;
-        }
-    }
-
-    // --- Image Validation ---
+    // Validate Image
     validateImage($imageBase64);
 
-    // --- Get AI Treatment ---
+    // Get AI Treatment
     $treatment = getAITreatment($imageBase64);
 
-    // --- Update Usage Tracking ---
-    if ($usage) {
-        $stmt = $pdo->prepare("
-            UPDATE usage_tracking 
-            SET image_count = image_count + 1, 
-                last_image_request = ?,
-                image_minute_counter = ?
-            WHERE id = ?
-        ");
-        $stmt->execute([$now, $newMinuteCounter, $usage['id']]);
-    } else {
-        $stmt = $pdo->prepare("
-            INSERT INTO usage_tracking 
-            (device_hash, date, image_count, last_image_request, image_minute_counter) 
-            VALUES (?, ?, 1, ?, 1)
-        ");
-        $stmt->execute([$deviceHash, $today, $now]);
-    }
-
     // Response
-echo json_encode(['success' => true, 'response' => $treatment]);
+    echo json_encode([
+        'success' => true,
+        'response' => $treatment
+    ]);
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
@@ -108,9 +54,9 @@ echo json_encode(['success' => true, 'response' => $treatment]);
     ]);
 }
 
-// --------------------------------------------------
+// ==============================================
 // ENHANCED VALIDATION FUNCTIONS
-// --------------------------------------------------
+// ==============================================
 
 function validateImage(&$imageBase64) {
     // Remove data URL prefix
@@ -125,7 +71,7 @@ function validateImage(&$imageBase64) {
     }
 
     // File size check (4MB max)
-    $fileSize = (int)(strlen($imageBase64) * 3 / 4); // Approximate real size
+    $fileSize = (int)(strlen($imageBase64) * 3 / 4);
     if ($fileSize > 4 * 1024 * 1024) {
         throw new Exception('Imagine prea mare (maxim 4MB)');
     }
@@ -142,6 +88,17 @@ function validateImage(&$imageBase64) {
         throw new Exception('Dimensiuni prea mari (maxim 4096x4096 pixeli)');
     }
 
+    // Reject very small images
+    if ($width < 200 || $height < 200) {
+        throw new Exception('Imaginea este prea mică (minim 200x200 pixeli)');
+    }
+
+    // Aspect ratio check
+    $aspectRatio = $width / $height;
+    if ($aspectRatio > 3 || $aspectRatio < 0.33) {
+        throw new Exception('Proporții nepotrivite pentru plante');
+    }
+
     // MIME type check
     $allowedTypes = ['image/jpeg', 'image/png'];
     if (!in_array($imageInfo['mime'], $allowedTypes)) {
@@ -149,9 +106,9 @@ function validateImage(&$imageBase64) {
     }
 }
 
-// -----------------------------------------------
-// SIMPLE FUNCTIONS (Google Vision + OpenAI)
-// -----------------------------------------------
+// ==============================================
+// AI PROCESSING WITH PLANT DETECTION
+// ==============================================
 
 function getAITreatment($imageBase64) {
     $googleVisionKey = getenv('GOOGLE_VISION_KEY');
@@ -179,7 +136,7 @@ function analyzeImageWithVisionAPI($imageBase64, $googleVisionKey) {
     $requestData = [
         'requests' => [[
             'image' => ['content' => $imageBase64],
-            'features' => [['type' => 'LABEL_DETECTION', 'maxResults' => 5]]
+            'features' => [['type' => 'LABEL_DETECTION', 'maxResults' => 10]]
         ]]
     ];
 
@@ -196,33 +153,70 @@ function analyzeImageWithVisionAPI($imageBase64, $googleVisionKey) {
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        $errorInfo = json_decode($response, true)['error']['message'] ?? 'Unknown error';
+        $errorInfo = json_decode($response, true)['error']['message'] ?? 'Eroare necunoscută';
         throw new Exception('Eroare Google Vision: ' . $errorInfo);
     }
 
-    $result = json_decode($response, true);
-    return $result;
+    return json_decode($response, true);
 }
 
 function buildPromptFromVisionResults($visionResults) {
     $labels = [];
+    $plantKeywords = ['plant', 'leaf', 'flower', 'tree', 'grass', 'foliage', 'vegetation', 
+                     'botanical', 'garden', 'herb', 'shrub', 'branch', 'petal', 'stem', 
+                     'roots', 'soil', 'pot', 'gardening', 'chlorosis', 'fungus', 'pest'];
+    $nonPlantKeywords = ['animal', 'cat', 'dog', 'person', 'human', 'car', 'building', 
+                        'screen', 'television', 'computer', 'minecraft', 'game', 'indoor', 
+                        'furniture', 'electronic', 'device', 'logo', 'text', 'paper'];
+
     if (isset($visionResults['responses'][0]['labelAnnotations'])) {
         foreach ($visionResults['responses'][0]['labelAnnotations'] as $label) {
-            $labels[] = $label['description'];
+            $labels[] = strtolower($label['description']);
         }
     }
 
-    if (empty($labels)) {
-        return "Analizează această imagine de plantă. Oferă un tratament concis, în română, pentru o plantă de grădină, în maxim 200 de cuvinte.";
+    // Plant detection logic
+    $hasPlant = false;
+    $hasNonPlant = false;
+    
+    foreach ($labels as $label) {
+        foreach ($plantKeywords as $keyword) {
+            if (strpos($label, $keyword) !== false) {
+                $hasPlant = true;
+                break 2;
+            }
+        }
+    }
+    
+    foreach ($labels as $label) {
+        foreach ($nonPlantKeywords as $keyword) {
+            if (strpos($label, $keyword) !== false) {
+                $hasNonPlant = true;
+                break 2;
+            }
+        }
     }
 
-    $prompt = "Analizează această imagine cu următoarele etichete: " . implode(', ', $labels) . ". ";
-    $prompt .= "Oferă un tratament concis, în română, pentru o plantă de grădină, în maxim 200 de cuvinte.";
+    if (!$hasPlant) {
+        throw new Exception('Imaginea nu conține o plantă clară. Te rog să fotografiezi o plantă de grădină.');
+    }
+    
+    if ($hasNonPlant) {
+        throw new Exception('Imaginea conține elemente care nu sunt plante. Te rog să focalizezi pe planta cu problema.');
+    }
+
+    $prompt = "Analizează această imagine cu următoarele elemente: " . implode(', ', $labels) . ". ";
+    $prompt .= "Oferă un tratament concis în română (150-250 cuvinte) pentru problema identificată. ";
+    $prompt .= "Dacă nu vezi probleme evidente, răspunde: 'Planta pare sănătoasă. Pentru sfaturi generale, trimite o întrebare text.'";
 
     return $prompt;
 }
 
 function getOpenAIResponse($prompt, $openaiKey) {
+    $systemPrompt = "Ești un expert în grădinărit. Răspunde DOAR la întrebări legate de plante. 
+    Dacă imaginea nu conține plante sau problema nu este clară, răspunde: 
+    'Nu pot oferi sfaturi pentru această imagine. Te rog să încerci cu o poză clară a unei plante cu semne de bolă sau dăunători.'";
+
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -233,7 +227,7 @@ function getOpenAIResponse($prompt, $openaiKey) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
         'model' => 'gpt-4o-mini',
         'messages' => [
-            ['role' => 'system', 'content' => "Ești un expert în grădinărit."],
+            ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $prompt]
         ],
         'max_tokens' => 400,
@@ -246,8 +240,7 @@ function getOpenAIResponse($prompt, $openaiKey) {
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        $errorInfo = json_decode($response, true)['error']['message'] ?? 'Unknown error';
-        throw new Exception('Eroare OpenAI: ' . $errorInfo);
+        throw new Exception('Eroare la procesarea imaginii');
     }
 
     $data = json_decode($response, true);
@@ -255,7 +248,14 @@ function getOpenAIResponse($prompt, $openaiKey) {
         throw new Exception('Răspuns invalid de la AI');
     }
 
-    return $data['choices'][0]['message']['content'];
+    $responseText = $data['choices'][0]['message']['content'];
+    
+    // Final safety check
+    if (stripos($responseText, 'nu pot oferi sfaturi') !== false) {
+        throw new Exception('Nu pot identifica probleme la plante în această poză.');
+    }
+
+    return $responseText;
 }
 
 function cleanForTTS($text) {
