@@ -42,12 +42,11 @@ try {
     validateImage($imageBase64);
 
     $treatment = getAITreatment($imageBase64, $userMessage);
-    logSuccess();
 
     echo json_encode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
-        'response' => ['text' => $treatment]
+        'response' => $treatment
     ]);
 
 } catch (Exception $e) {
@@ -65,6 +64,39 @@ function sanitizeInput($text) {
 function validateImage(&$imageBase64) {
     if (strlen($imageBase64) > 5 * 1024 * 1024) throw new Exception('Imagine prea mare');
     if (!preg_match('/^[a-zA-Z0-9\/+\s=]+$/', $imageBase64)) throw new Exception('Imagine invalidă');
+}
+
+function analyzeImageWithVisionAPI($imageBase64) {
+    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
+    
+    $requestData = [
+        'requests' => [[
+            'image' => ['content' => $imageBase64],
+            'features' => [
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
+                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
+                ['type' => 'WEB_DETECTION', 'maxResults' => 10],
+                ['type' => 'IMAGE_PROPERTIES']
+            ]
+        ]]
+    ];
+
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST',
+            'content' => json_encode($requestData)
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $response = file_get_contents($url, false, $context);
+    
+    if ($response === FALSE) {
+        throw new Exception('Eroare la analiza imaginii (Google Vision)');
+    }
+    
+    return json_decode($response, true);
 }
 
 function getAITreatment($imageBase64, $userMessage) {
