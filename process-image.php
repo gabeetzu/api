@@ -76,10 +76,20 @@ function validateImage(&$imageBase64) {
 
 function getAITreatment($imageBase64, $userMessage) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
-    $features = extractVisualFeatures($visionData, $imageBase64);
-    $prompt = buildExpertPrompt($features, $userMessage);
+    $features = extractVisualFeatures($visionData);
+    
+    $hasSymptoms = count($features) > 0 
+    && !preg_grep('/^Culori dominante:/', $features)
+    && !preg_grep('/nu a fost clasificată/i', $features);
+
+
+    $prompt = $hasSymptoms 
+        ? buildExpertPrompt($features, $userMessage)
+        : buildClarificationPrompt($features, $userMessage);
+
     return getGPTResponse($prompt);
 }
+
 
 function analyzeImageWithVisionAPI($imageBase64) {
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
@@ -209,6 +219,22 @@ Dacă informații insuficiente:
 </neclar>
 PROMPT;
 }
+function buildClarificationPrompt($features, $userMessage) {
+    $formatted = formatFeatures($features);
+    return <<<PROMPT
+**Imagine analizată automat:**
+$formatted
+
+Din imagine nu pot identifica probleme clare. Poate calitatea nu e suficient de bună sau simptomele nu sunt vizibile clar. Dar te pot ajuta imediat dacă îmi spui:
+
+• Ce tip de plantă e? (ex: roșie, ardei, viță de vie)  
+• Ce simptome ai observat tu? (ex: pete, ofilire, frunze căzute)  
+• Când au apărut simptomele?  
+• Ai aplicat vreun tratament deja?
+
+Te rog răspunde cu cât mai multe detalii și îți ofer imediat sfaturi clare și un tratament potrivit.
+PROMPT;
+}
 
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
@@ -242,7 +268,7 @@ function formatResponse($text) {
     $text = str_replace(['<tratament>', '</tratament>'], "\n💊 Tratament\n", $text);
     $text = str_replace(['<monitorizare>', '</monitorizare>'], "\n👀 Recomandări\n", $text);
     $text = str_replace(['<neclar>', '</neclar>'], "\n❓ Necesită verificare\n", $text);
-    return str_replace(['**', '•'], ['', '•'], $text);
+    return str_replace('**', '', $text);
 }
 
 function logSuccess() {
