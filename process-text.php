@@ -95,20 +95,20 @@ try {
 
     echo json_encode([
     'success' => true,
-    'response' => [
-        'display' => formatForDisplay($rawResponse),
-        'tts' => cleanForTTS($rawResponse)
-    ]
+    'response' => formatForDisplay($rawResponse)
 ]);
+
 
 
 } catch (Exception $e) {
     error_log("ERROR: " . $e->getMessage());
     http_response_code(400);
     echo json_encode([
-        'success' => false,
-        'error' => $e->getMessage()
-    ]);
+    'success' => true,
+    'response_id' => $responseId ?? null,
+    'response' => $displayText,
+    'tts' => $ttsText
+]);
 }
 
 // ====================
