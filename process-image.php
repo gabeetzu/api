@@ -191,40 +191,39 @@ function hasDiseaseKeyword($text, $keywords) {
 // --- Prompt Engineering ---
 function buildHybridPrompt($features, $userMessage, $cnnDiagnosis) {
     return <<<PROMPT
-## Context Analiză Plantă ##
-Diagnostic CNN: {$cnnDiagnosis}
-Simptome vizuale detectate:
-{$features}
+Ești un asistent agronom prietenos pentru aplicația GospodApp. Răspunde în limba română clar și empatic.
 
-## Întrebare Utilizator ##
-{$userMessage}
+Context: 
+- Diagnostic model AI: {$cnnDiagnosis}
+- Simptome vizuale: {$features}
+- Întrebare de la utilizator: {$userMessage}
 
-## Cerințe Răspuns ##
-Structurați răspunsul cu:
-1. Confirmare diagnostic (dacă CNN și vizual corespund)
-2. 3 pași de acțiune practici
-3. Măsuri preventive
-4. Produse recomandate (doar aprobate UE)
+Instrucțiuni:
+1. Începe cu o adresare caldă ("Salut! Am analizat imaginea ta...")
+2. Explică pe scurt ce ar putea avea planta, folosind cuvinte simple.
+3. Oferă 2-3 pași concreți de acțiune (folosește emoji unde se potrivește, ex: 💧☀️✂️).
+4. Recomandă un produs sau tratament (numai dacă e aprobat UE).
+5. Dă un sfat de prevenire și încheie cu o încurajare ("Succes cu grădina ta!").
+6. Dacă informațiile nu sunt suficiente, cere detalii suplimentare.
 
-Folosiți limba română simplă, fără jargon tehnic. Dacă informațiile sunt insuficiente, cereți detalii suplimentare.
+Reguli:
+- Nu folosi termeni științifici sau liste lungi.
+- Max. 5 propoziții.
+- Fii pozitiv și scurt. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
 PROMPT;
 }
 
+
 function buildCnnBasedPrompt($diagnosis, $userMessage) {
     return <<<PROMPT
-## Diagnostic CNN ##
-{$diagnosis}
+Salut! Am analizat diagnosticul AI: {$diagnosis}
+Întrebarea ta: {$userMessage}
 
-## Întrebare Utilizator ##
-{$userMessage}
-
-## Cerințe Răspuns ##
-1. Explicați diagnosticul în termeni simpli
-2. Recomandări tratament pas cu pas
-3. Prevenirea răspândirii
-4. Perioada de recuperare estimată
-
-Folosiți limba română, maxim 3 propoziții per punct.
+Instrucțiuni:
+1. Explică diagnosticul pe scurt, cu cuvinte simple.
+2. Dă 2-3 pași concreți de acțiune (emoji dacă se potrivește).
+3. Sfat de prevenire și o încurajare ("Succes cu grădina ta!").
+Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
 PROMPT;
 }
 
@@ -255,14 +254,15 @@ function getGPTResponseWithCache($prompt) {
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Sunteți asistent agronom pentru aplicația GospodApp. Răspundeți în română.'
+                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
+'
                 ],
                 [
                     'role' => 'user',
                     'content' => $prompt
                 ]
             ],
-            'temperature' => 0.3,
+            'temperature' => 0.7,
             'max_tokens' => 600,
             'top_p' => 0.9
         ])
