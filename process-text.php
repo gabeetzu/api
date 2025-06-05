@@ -44,8 +44,15 @@ try {
         $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
     } elseif (!empty($cnnDiagnosis)) {
         $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
+    } elseif (!empty($userMessage)) {
+        // Handle pure text question (if you want to allow this)
+        $treatment = getGPTResponse($userMessage);
     } else {
-        throw new Exception('Date lipsă: Trimiteți o imagine sau un diagnostic');
+        throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
+    }
+
+    if ($treatment === null) {
+        throw new Exception('Răspuns gol de la AI');
     }
 
     echo safeJsonEncode([
