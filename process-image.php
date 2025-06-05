@@ -279,9 +279,8 @@ function getGPTResponseWithCache($prompt) {
     }
 
     $formatted = formatResponse($data['choices'][0]['message']['content']);
-    $redis->setex($cacheKey, 3600, json_encode($formatted, JSON_UNESCAPED_UNICODE));
-    
-    return $formatted;
+$redis->setex($cacheKey, 3600, json_encode(['response' => $formatted], JSON_UNESCAPED_UNICODE));
+return ['response' => $formatted];
 }
 
 function formatResponse($text) {
