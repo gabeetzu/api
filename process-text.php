@@ -101,15 +101,14 @@ try {
 
 
 } catch (Exception $e) {
-    error_log("ERROR: " . $e->getMessage());
     http_response_code(400);
     echo json_encode([
-    'success' => true,
-    'response_id' => $responseId ?? null,
-    'response' => $displayText,
-    'tts' => $ttsText
-]);
+        'success' => false, // ✅ Correct success flag
+        'error' => $e->getMessage(),
+        'response_id' => bin2hex(random_bytes(6))
+    ], JSON_UNESCAPED_UNICODE);
 }
+
 
 // ====================
 // PROCESSING FUNCTIONS
