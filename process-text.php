@@ -1,209 +1,125 @@
 <?php
-
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
+mb_internal_encoding("UTF-8");
 
-// --- Environment Variables ---
-$apiSecretKey = getenv('API_SECRET_KEY');
-$googleVisionKey = getenv('GOOGLE_VISION_KEY');
-$openaiKey = getenv('OPENAI_API_KEY');
-$dbHost = getenv('DB_HOST');
-$dbUser = getenv('DB_USER');
-$dbPass = getenv('DB_PASS');
-$dbName = getenv('DB_NAME');
-$redisHost = getenv('REDIS_HOST');
-$redisPort = getenv('REDIS_PORT');
-$redisPass = getenv('REDIS_PASSWORD');
-
-// --- Security Check ---
-$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-if ($apiKey !== $apiSecretKey) {
-    http_response_code(401);
-    die(json_encode(['success' => false, 'error' => 'Acces neautorizat']));
+// --- Handle preflight CORS ---
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
 }
 
-// --- Redis Rate Limiter ---
-try {
-    if ($redisHost && $redisPort) {
-        $redis = new Redis();
-        $redis->connect($redisHost, $redisPort);
-        if ($redisPass) $redis->auth($redisPass);
-        
-        $clientIp = $_SERVER['REMOTE_ADDR'];
-        $ipKey = "ip_limit:$clientIp";
-        
-        if ($redis->exists($ipKey) && $redis->get($ipKey) >= 20) {
-            http_response_code(429);
-            die(json_encode(['success' => false, 'error' => 'Prea multe solicitări']));
-        }
-        
-        $redis->multi()
-            ->incr($ipKey)
-            ->expire($ipKey, 60)
-            ->exec();
-    }
-} catch (Exception $e) {
-    error_log("Redis error: " . $e->getMessage());
+// --- API Key Security ---
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+$expectedKey = getenv('API_SECRET_KEY');
+if (!hash_equals($expectedKey, $apiKey)) {
+    http_response_code(401);
+    die(safeJsonEncode(['success' => false, 'error' => 'Acces neautorizat']));
 }
 
 // --- Database Connection ---
 try {
     $pdo = new PDO(
-        "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4",
-        $dbUser,
-        $dbPass,
+        "mysql:host=" . getenv('DB_HOST') . ";dbname=" . getenv('DB_NAME') . ";charset=utf8mb4",
+        getenv('DB_USER'),
+        getenv('DB_PASS'),
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 } catch (Exception $e) {
     error_log("DB error: " . $e->getMessage());
     http_response_code(500);
-    die(json_encode(['success' => false, 'error' => 'Service unavailable']));
+    die(safeJsonEncode(['success' => false, 'error' => 'Service unavailable']));
 }
 
 try {
-    $input = file_get_contents('php://input');
-    $data = json_decode($input, true);
+    $input = getInputData();
+    $imageBase64 = $input['image'] ?? '';
+    $userMessage = sanitizeInput($input['message'] ?? '');
+    $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
 
-    // --- Image Processing ---
-    if (isset($data['image'])) {
-        $imageBase64 = $data['image'];
-        $userMessage = $data['message'] ?? '';
-        $deviceHash = $data['device_hash'] ?? '';
-
+    if (!empty($imageBase64)) {
         validateImage($imageBase64);
-        validateDeviceHash($deviceHash);
-        trackUsage($pdo, $deviceHash, 'image');
-        
-        $rawResponse = processImage($imageBase64, $userMessage);
-
-    // --- Text Processing ---
-    } elseif (isset($data['message'], $data['device_hash'])) {
-        $message = trim($data['message']);
-        $deviceHash = $data['device_hash'];
-
-        validateTextInput($message);
-        validateDeviceHash($deviceHash);
-        trackUsage($pdo, $deviceHash, 'text');
-        
-        $rawResponse = processText($message);
-
+        $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+    } elseif (!empty($cnnDiagnosis)) {
+        $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
     } else {
-        throw new Exception('Cerere invalidă');
+        throw new Exception('Date lipsă: Trimiteți o imagine sau un diagnostic');
     }
 
-    echo json_encode([
-    'success' => true,
-    'response' => formatForDisplay($rawResponse)
-]);
-
-
+    echo safeJsonEncode([
+        'success' => true,
+        'response_id' => bin2hex(random_bytes(6)),
+        'response' => $treatment
+    ]);
 
 } catch (Exception $e) {
     http_response_code(400);
-    echo json_encode([
-        'success' => false, // ✅ Correct success flag
-        'error' => $e->getMessage(),
-        'response_id' => bin2hex(random_bytes(6))
-    ], JSON_UNESCAPED_UNICODE);
+    echo safeJsonEncode([
+        'success' => false,
+        'error' => $e->getMessage()
+    ]);
 }
 
+// --- Helper Functions ---
+function safeJsonEncode($data) {
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        http_response_code(500);
+        exit(json_encode([
+            'success' => false,
+            'error' => 'Eroare internă: ' . json_last_error_msg()
+        ]));
+    }
+    return $json;
+}
 
-// ====================
-// PROCESSING FUNCTIONS
-// ====================
+function getInputData() {
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (stripos($contentType, 'application/json') !== false) {
+        $data = json_decode(file_get_contents('php://input'), true);
+        return is_array($data) ? $data : [];
+    }
+    return $_POST;
+}
 
-function processImage($imageBase64, $userMessage) {
+function sanitizeInput($text) {
+    $clean = trim(strip_tags($text));
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,;:!?()-]/u', '', $clean);
+    return mb_substr($clean, 0, 300);
+}
+
+function validateImage(&$imageBase64) {
+    if (strlen($imageBase64) > 5 * 1024 * 1024) {
+        throw new Exception('Imagine prea mare (max 5MB)');
+    }
+    if (!preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $imageBase64)) {
+        throw new Exception('Format imagine invalid');
+    }
+}
+
+// --- Processing Functions ---
+function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
-    $prompt = buildImagePrompt($features, $userMessage);
-    return getGPTResponse($prompt, true);
+    $prompt = buildHybridPrompt(
+        formatFeatures($features),
+        $userMessage,
+        $cnnDiagnosis
+    );
+    return getGPTResponse($prompt);
 }
 
-function processText($message) {
-    $season = getRomanianSeason(); // Helper for season, see below
-
-    $systemPrompt = <<<PROMPT
-Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos, natural și exemple practice.
-
-Instrucțiuni:
-- Începe cu o adresare caldă ("Salut! Îți răspund cu drag...")
-- Explică pe scurt ce ar putea avea planta, cu cuvinte simple.
-- Oferă 2-3 pași concreți de acțiune (folosește emoji unde se potrivește, ex: 💧☀️✂️).
-- Recomandă un produs sau tratament (numai dacă e aprobat UE).
-- Dă un sfat de prevenire și încheie cu o încurajare ("Succes cu grădina ta!").
-- Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
-- Menționează sezonul actual: {$season}.
-
-Reguli:
-- Nu folosi termeni științifici sau liste lungi.
-- Max. 5 propoziții.
-- Fii pozitiv și scurt.
-PROMPT;
-
-    return getGPTResponse($systemPrompt, $message);
+function handleCnnDiagnosis($diagnosis, $userMessage) {
+    $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
+    return getGPTResponse($prompt);
 }
 
+// ... Keep all your existing vision/GPT functions unchanged ...
 
-// ====================
-// CORE FUNCTIONALITY
-// ====================
-
-function analyzeImageWithVisionAPI($imageBase64) {
-    $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
-    
-    $requestData = [
-        'requests' => [[
-            'image' => ['content' => $imageBase64],
-            'features' => [
-                ['type' => 'LABEL_DETECTION', 'maxResults' => 20],
-                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
-                ['type' => 'WEB_DETECTION', 'maxResults' => 10],
-                ['type' => 'IMAGE_PROPERTIES']
-            ]
-        ]]
-    ];
-
-    $options = [
-        'http' => [
-            'header'  => "Content-type: application/json\r\n",
-            'method'  => 'POST',
-            'content' => json_encode($requestData)
-        ]
-    ];
-    
-    $context = stream_context_create($options);
-    $response = file_get_contents($url, false, $context);
-    
-    if ($response === FALSE) {
-        throw new Exception('Eroare analiză imagine');
-    }
-    
-    return json_decode($response, true);
-}
-
-function extractVisualFeatures($visionData) {
-    $features = [];
-    $keywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
-
-    foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
-        if ($label['score'] > 0.8 && preg_match('/(' . implode('|', $keywords) . ')/i', $label['description'])) {
-            $features[] = $label['description'];
-        }
-    }
-
-    foreach ($visionData['responses'][0]['webDetection']['webEntities'] ?? [] as $entity) {
-        if (($entity['score'] ?? 0) > 0.7 && preg_match('/(' . implode('|', $keywords) . ')/i', $entity['description'] ?? '')) {
-            $features[] = "Context web: " . substr($entity['description'], 0, 50);
-        }
-    }
-
-    return array_unique($features);
-}
-
-function getGPTResponse($systemPrompt, $userPrompt) {
-    $model = 'gpt-4o-mini';
+// --- GPT Response Handler ---
+function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -211,21 +127,29 @@ function getGPTResponse($systemPrompt, $userPrompt) {
             'Content-Type: application/json',
             'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
         ],
+        CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
-            'model' => $model,
+            'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' => $systemPrompt],
-                ['role' => 'user', 'content' => $userPrompt]
+                ['role' => 'system', 'content' => 'Sunteți asistent agronom pentru aplicația GospodApp. Răspundeți în română.'],
+                ['role' => 'user', 'content' => $prompt]
             ],
-            'temperature' => 0.4,
+            'temperature' => 0.3,
             'max_tokens' => 600
         ])
     ]);
+
     $response = curl_exec($ch);
-    if (!$response) throw new Exception('Eroare AI');
-    
+    if (!$response || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
+        throw new Exception('Eroare serviciu AI');
+    }
+
     $data = json_decode($response, true);
-    return $data['choices'][0]['message']['content'];
+    if (empty($data['choices'][0]['message']['content'])) {
+        throw new Exception('Răspuns invalid de la AI');
+    }
+
+    return formatResponse($data['choices'][0]['message']['content']);
 }
 
 // ====================
