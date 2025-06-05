@@ -19,15 +19,6 @@ if (!hash_equals($expectedKey, $apiKey)) {
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat'], JSON_UNESCAPED_UNICODE));
 }
 
-// --- Redis Setup ---
-$redis = new Redis();
-try {
-    $redis->connect('tls://' . getenv('REDIS_HOST'), getenv('REDIS_PORT'));
-    $redis->auth([getenv('REDIS_USER'), getenv('REDIS_PASSWORD')]);
-} catch (Exception $e) {
-    error_log("Redis connection failed: " . $e->getMessage());
-}
-
 try {
     $input = getInputData();
     $imageBase64 = $input['image'] ?? '';
@@ -84,13 +75,6 @@ function validateImage(&$imageBase64) {
 
 // --- Image Analysis Pipeline ---
 function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
-    global $redis;
-    
-    $cacheKey = 'vision:' . hash('sha256', $imageBase64 . $userMessage . $cnnDiagnosis);
-    if ($cached = $redis->get($cacheKey)) {
-        return json_decode($cached, true);
-    }
-
     $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
     
@@ -100,25 +84,12 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
         $cnnDiagnosis
     );
     
-    $treatment = getGPTResponseWithCache($prompt);
-    
-    $redis->setex($cacheKey, 1800, json_encode($treatment, JSON_UNESCAPED_UNICODE));
-    return $treatment;
+    return getGPTResponse($prompt);
 }
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
-    global $redis;
-    
-    $cacheKey = 'cnn:' . hash('sha256', $diagnosis . $userMessage);
-    if ($cached = $redis->get($cacheKey)) {
-        return json_decode($cached, true);
-    }
-
     $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
-    $treatment = getGPTResponseWithCache($prompt);
-    
-    $redis->setex($cacheKey, 3600, json_encode($treatment, JSON_UNESCAPED_UNICODE));
-    return $treatment;
+    return getGPTResponse($prompt);
 }
 
 // --- Vision API Integration ---
@@ -213,7 +184,6 @@ Reguli:
 PROMPT;
 }
 
-
 function buildCnnBasedPrompt($diagnosis, $userMessage) {
     return <<<PROMPT
 Salut! Am analizat diagnosticul AI: {$diagnosis}
@@ -232,14 +202,7 @@ function formatFeatures(array $features) {
 }
 
 // --- GPT-4o Integration ---
-function getGPTResponseWithCache($prompt) {
-    global $redis;
-    
-    $cacheKey = 'gpt:' . hash('sha256', $prompt);
-    if ($cached = $redis->get($cacheKey)) {
-        return $cached;
-    }
-
+function getGPTResponse($prompt) {
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
@@ -254,8 +217,7 @@ function getGPTResponseWithCache($prompt) {
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
-'
+                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.'
                 ],
                 [
                     'role' => 'user',
@@ -278,9 +240,7 @@ function getGPTResponseWithCache($prompt) {
         throw new Exception('Răspuns invalid de la AI');
     }
 
-    $formatted = formatResponse($data['choices'][0]['message']['content']);
-$redis->setex($cacheKey, 3600, json_encode(['response' => $formatted], JSON_UNESCAPED_UNICODE));
-return ['response' => $formatted];
+    return formatResponse($data['choices'][0]['message']['content']);
 }
 
 function formatResponse($text) {
