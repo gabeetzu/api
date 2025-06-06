@@ -96,7 +96,9 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     $response = getGPTResponse($prompt);
 
     // ✅ Save training data
+    if (!empty($imageBase64)) {
     saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
+}
 
     return $response;
 }
@@ -115,11 +117,6 @@ function runYoloFallback($base64) {
     return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
 }
     
-    // ✅ Save training data
-    saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
-
-    return $response;
-}
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
     $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
@@ -294,14 +291,17 @@ function formatResponse($text) {
     ], $text);
 }
 
-// ✅ Save image + metadata
 function saveTrainingExample($base64, $label, $note) {
+    if (empty($base64)) return;
+
     $dir = __DIR__ . '/data/uploads';
     if (!file_exists($dir)) {
         mkdir($dir, 0775, true);
     }
 
     $imageData = base64_decode($base64);
+    if (!$imageData) return;
+
     $filename = 'plant_' . time() . '_' . rand(1000, 9999) . '.jpg';
     $filePath = $dir . '/' . $filename;
     file_put_contents($filePath, $imageData);
