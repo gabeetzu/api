@@ -121,6 +121,20 @@ function handleCnnDiagnosis($diagnosis, $userMessage) {
     return getGPTResponse($prompt);
 }
 
+function formatResponse($text) {
+    return preg_replace([
+        '/##\s+/',
+        '/\*\*(.*?)\*\*/',
+        '/<tratament>/i',
+        '/<prevenire>/i'
+    ], [
+        '🔸 ',
+        '$1',
+        '💊 Tratament:',
+        '🛡 Prevenire:'
+    ], $text);
+}
+
 // --- GPT Response Handler ---
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
