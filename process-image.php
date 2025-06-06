@@ -46,11 +46,19 @@ try {
     }
 
     logEvent('ImageResponse', $response);
-    echo json_encode([
+    $json = json_encode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
-        'response' => is_string($response) ? ['text' => $response, 'raw' => $response] : $response
+        'response' => ['text' => $response, 'raw' => $response]
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    if ($json === false) {
+        http_response_code(500);
+        echo '{"success":false,"error":"Eroare la formatul JSON"}';
+        exit();
+    }
+
+    echo $json;
 
 } catch (Exception $e) {
     logEvent('Error', $e->getMessage());
@@ -85,6 +93,7 @@ function validateImage(&$base64) {
     if (strlen($base64) > 5 * 1024 * 1024) throw new Exception('Imagine prea mare (max 5MB)');
     if (!preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $base64)) throw new Exception('Format imagine invalid');
 }
+
 function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($base64);
     $features = extractVisualFeatures($visionData);
@@ -105,12 +114,15 @@ function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
 }
 
 function runYoloFallback($base64) {
+    if (!function_exists('shell_exec')) throw new Exception('YOLO nu poate rula: funcție dezactivată');
+
     $tmp = __DIR__ . '/temp_yolo.jpg';
     file_put_contents($tmp, base64_decode($base64));
     $cmd = escapeshellcmd("python3 yolo_infer.py " . escapeshellarg($tmp));
     $output = shell_exec($cmd);
-    if (!$output) return ["Analiza alternativă a eșuat"];
+    @unlink($tmp);
 
+    if (!$output) return ["Analiza alternativă a eșuat"];
     $data = json_decode($output, true);
     if (!is_array($data) || !isset($data['label'])) return ["YOLO nu a returnat etichete valide"];
     return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
@@ -138,8 +150,11 @@ function analyzeImageWithVisionAPI($base64) {
         'content' => json_encode($body)
     ]];
     $context = stream_context_create($opts);
-    $res = file_get_contents($url, false, $context);
-    if (!$res) throw new Exception('Eroare la analiza imaginii');
+    $res = @file_get_contents($url, false, $context);
+    if (!$res) {
+        logEvent('VisionFail', $http_response_header ?? []);
+        throw new Exception('Eroare la analiza imaginii');
+    }
     return json_decode($res, true);
 }
 
@@ -223,16 +238,20 @@ function getGPTResponse($prompt) {
                 ['role' => 'user', 'content' => $prompt]
             ],
             'temperature' => 0.7,
-            'max_tokens' => 600,
+            'max_tokens' => 1200,
             'top_p' => 0.9
         ])
     ]);
     $res = curl_exec($ch);
-    if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) throw new Exception('Eroare la serviciul OpenAI');
+    if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
+        curl_close($ch);
+        throw new Exception('Eroare la serviciul OpenAI');
+    }
+    curl_close($ch);
     $data = json_decode($res, true);
     if (empty($data['choices'][0]['message']['content'])) throw new Exception('Răspuns invalid de la AI');
     $raw = $data['choices'][0]['message']['content'];
-    return ['text' => formatResponse($raw), 'raw' => $raw];
+    return formatResponse($raw);
 }
 
 function formatResponse($text) {
