@@ -49,7 +49,7 @@ try {
         throw new Exception('Date lipsă: trimiteți o imagine, un diagnostic sau un mesaj.');
     }
 
-    logEvent('ImageResponse', ['text' => $response]);
+    logEvent('ImageResponse', ['preview' => mb_substr($response, 0, 100)]);
     $json = json_encode([
     'success' => true,
     'response_id' => bin2hex(random_bytes(6)),
