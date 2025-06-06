@@ -135,7 +135,7 @@ function jsonResponse($success, $payload) {
 }
 
 function logEvent($label, $data) {
-    $dir = '/var/data/logs';
+    $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
     $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
     file_put_contents($dir . '/activity.log', $line, FILE_APPEND);
