@@ -5,6 +5,9 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
+ini_set('display_errors', 0);
+error_reporting(0);
+
 // --- CORS Preflight ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
