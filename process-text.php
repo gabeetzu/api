@@ -46,8 +46,12 @@ try {
     $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
 } elseif (!empty($userMessage)) {
     // ✅ Force return to be an object with text/raw
-    $response = getGPTResponse($userMessage);
-    $treatment = is_array($response) ? $response : ['text' => $response, 'raw' => $response];
+    echo safeJsonEncode([
+    'success' => true,
+    'response_id' => bin2hex(random_bytes(6)),
+    'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
+]);
+
 } else {
     throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
 }
