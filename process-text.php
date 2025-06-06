@@ -87,6 +87,8 @@ function buildPrompt($userMessage, $diagnosis) {
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
+        CURLOPT_TIMEOUT => 10,               // Total request timeout
+        CURLOPT_CONNECTTIMEOUT => 5,         // Time to connect before giving up
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: application/json',
@@ -104,6 +106,7 @@ function getGPTResponse($prompt) {
             'max_tokens' => 500
         ])
     ]);
+
     $res = curl_exec($ch);
     if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
         throw new Exception('Eroare serviciu OpenAI');
