@@ -116,7 +116,7 @@ function getGPTResponse($prompt) {
     }
     $data = json_decode($res, true);
     $text = $data['choices'][0]['message']['content'] ?? '';
-    return ['text' => formatResponse($text), 'raw' => $text];
+    'response' => $response
 }
 
 function formatResponse($text) {
