@@ -5,6 +5,10 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
+ini_set('display_errors', 0);
+error_reporting(0);
+
+
 function logEvent($label, $data) {
     $dir = '/var/data/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
