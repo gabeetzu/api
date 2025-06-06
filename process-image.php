@@ -49,12 +49,12 @@ try {
         throw new Exception('Date lipsă: trimiteți o imagine, un diagnostic sau un mesaj.');
     }
 
-    logEvent('ImageResponse', $response);
+    logEvent('ImageResponse', ['text' => $response]);
     $json = json_encode([
-        'success' => true,
-        'response_id' => bin2hex(random_bytes(6)),
-        'response' => ['text' => $response, 'raw' => $response]
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    'success' => true,
+    'response_id' => bin2hex(random_bytes(6)),
+    'response' => $response  // now a flat string
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
     if ($json === false) {
         http_response_code(500);
@@ -102,8 +102,9 @@ function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($base64);
     $features = extractVisualFeatures($visionData);
 
-    if (empty($features) || (count($features) === 1 && str_contains($features[0], 'Nu s-au detectat'))) {
-        $features = runYoloFallback($base64);
+    // If Vision fails or is weak, fallback to TFLite diagnosis (already coming from Android client)
+    if (empty($features)) {
+        $features = ["Nu s-au detectat semne clare pe imagine"];
     }
 
     $prompt = buildHybridPrompt(
@@ -115,21 +116,6 @@ function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
     $result = getGPTResponse($prompt);
     saveTrainingExample($base64, $cnnDiagnosis, $userMessage);
     return $result;
-}
-
-function runYoloFallback($base64) {
-    if (!function_exists('shell_exec')) throw new Exception('YOLO nu poate rula: funcție dezactivată');
-
-    $tmp = __DIR__ . '/temp_yolo.jpg';
-    file_put_contents($tmp, base64_decode($base64));
-    $cmd = escapeshellcmd("python3 yolo_infer.py " . escapeshellarg($tmp));
-    $output = shell_exec($cmd);
-    @unlink($tmp);
-
-    if (!$output) return ["Analiza alternativă a eșuat"];
-    $data = json_decode($output, true);
-    if (!is_array($data) || !isset($data['label'])) return ["YOLO nu a returnat etichete valide"];
-    return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
 }
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
