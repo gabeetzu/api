@@ -5,6 +5,14 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
+// --- Logging ---
+function logEvent($label, $data) {
+    $logDir = __DIR__ . '/logs';
+    if (!file_exists($logDir)) mkdir($logDir, 0775, true);
+    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    file_put_contents($logDir . '/activity.log', $line, FILE_APPEND);
+}
+
 // --- Handle preflight CORS ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -15,12 +23,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 if (!hash_equals($expectedKey, $apiKey)) {
+    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat'], JSON_UNESCAPED_UNICODE));
 }
 
 try {
     $input = getInputData();
+    logEvent('Input', $input);
+
     $imageBase64 = $input['image'] ?? '';
     $userMessage = sanitizeInput($input['message'] ?? '');
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
@@ -31,7 +42,7 @@ try {
     } elseif (!empty($cnnDiagnosis)) {
         $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
     } elseif (!empty($userMessage)) {
-        $treatment = getGPTResponse($userMessage); // ✅ FIXED HERE
+        $treatment = getGPTResponse($userMessage);
     } else {
         throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
     }
@@ -45,8 +56,10 @@ try {
         'response_id' => bin2hex(random_bytes(6)),
         'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
     ]);
+    logEvent('Success', $treatment);
 
 } catch (Exception $e) {
+    logEvent('Error', $e->getMessage());
     http_response_code(400);
     echo safeJsonEncode([
         'success' => false,
@@ -54,7 +67,6 @@ try {
     ]);
 }
 
-// --- Helper Functions ---
 function getInputData() {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'application/json') !== false) {
@@ -74,7 +86,7 @@ function validateImage(&$imageBase64) {
     if (strlen($imageBase64) > 5 * 1024 * 1024) {
         throw new Exception('Imagine prea mare (max 5MB)');
     }
-    if (!preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $imageBase64)) {
+    if (!preg_match('/^[a-zA-Z0-9\/+=]+$/', $imageBase64)) {
         throw new Exception('Format imagine invalid');
     }
 }
@@ -94,11 +106,7 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     );
 
     $response = getGPTResponse($prompt);
-
-    // ✅ Save training data
-    if (!empty($imageBase64)) {
     saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
-}
 
     return $response;
 }
@@ -106,27 +114,20 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
 function runYoloFallback($base64) {
     $tmp = __DIR__ . '/temp_yolo.jpg';
     file_put_contents($tmp, base64_decode($base64));
-
     $cmd = escapeshellcmd("python3 yolo_infer.py " . escapeshellarg($tmp));
     $output = shell_exec($cmd);
     if (!$output) return ["Analiza alternativă a eșuat"];
-
     $data = json_decode($output, true);
-    if (!isset($data['label'])) return ["YOLO nu a detectat nimic clar"];
-
-    return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
+    return isset($data['label']) ? [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"] : ["YOLO nu a detectat nimic clar"];
 }
-    
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
     $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
     return getGPTResponse($prompt);
 }
 
-// --- Vision API Integration ---
 function analyzeImageWithVisionAPI($imageBase64) {
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
-    
     $requestData = [
         'requests' => [[
             'image' => ['content' => $imageBase64],
@@ -143,33 +144,25 @@ function analyzeImageWithVisionAPI($imageBase64) {
             'header'  => "Content-Type: application/json\r\n",
             'method'  => 'POST',
             'content' => json_encode($requestData)
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true
         ]
     ];
-    
+
     $context = stream_context_create($options);
     $response = file_get_contents($url, false, $context);
-    
     if ($response === false) {
         throw new Exception('Eroare la analiza imaginii');
     }
-    
     return json_decode($response, true);
 }
 
 function extractVisualFeatures($visionData) {
     $features = [];
     $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
-    
     foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
         if ($label['score'] > 0.75 && hasDiseaseKeyword($label['description'], $diseaseKeywords)) {
             $features[] = ucfirst($label['description']);
         }
     }
-
     $colors = [];
     foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
         if ($color['pixelFraction'] > 0.05) {
@@ -180,12 +173,11 @@ function extractVisualFeatures($visionData) {
     if (!empty($colors)) {
         $features[] = "Culori predominante: " . implode(', ', $colors);
     }
-    
     return empty($features) ? ["Nu s-au detectat caracteristici clare"] : $features;
 }
 
 function hasDiseaseKeyword($text, $keywords) {
-    return preg_match('/\b(' . implode('|', $keywords) . ')\b/i', $text);
+    return preg_match('/\\b(' . implode('|', $keywords) . ')\\b/i', $text);
 }
 
 // --- Prompt Engineering ---
@@ -193,23 +185,23 @@ function buildHybridPrompt($features, $userMessage, $cnnDiagnosis) {
     return <<<PROMPT
 Ești un asistent agronom prietenos pentru aplicația GospodApp. Răspunde în limba română clar și empatic.
 
-Context: 
-- Diagnostic model AI: {$cnnDiagnosis ?: 'Nespecificat'}
+Context:
+- Diagnostic AI: {$cnnDiagnosis}
 - Simptome vizuale: {$features}
-- Întrebare de la utilizator: {$userMessage}
+- Întrebare utilizator: {$userMessage}
 
 Instrucțiuni:
-1. Începe cu o adresare caldă ("Salut! Am analizat imaginea ta...")
-2. Explică pe scurt ce ar putea avea planta, folosind cuvinte simple.
-3. Oferă 2-3 pași concreți de acțiune (folosește emoji unde se potrivește, ex: 💧☀️✂️).
-4. Recomandă un produs sau tratament (numai dacă e aprobat UE).
-5. Dă un sfat de prevenire și încheie cu o încurajare ("Succes cu grădina ta!").
-6. Dacă informațiile nu sunt suficiente, cere detalii suplimentare.
+1. Începe cu o adresare prietenoasă („Salut! Am analizat imaginea ta...”)
+2. Spune clar ce poate avea planta, fără termeni complicați.
+3. Oferă 2-3 pași concreți (cu emoji dacă e cazul, ex: 💧☀️✂️).
+4. Sugerează un produs (numai dacă e aprobat UE).
+5. Încheie cu un sfat de prevenire + încurajare („Succes cu grădina ta!”)
+6. Dacă nu ai destule informații, cere detalii în plus.
 
 Reguli:
-- Nu folosi termeni științifici sau liste lungi.
+- Fără liste lungi sau termeni științifici.
 - Max. 5 propoziții.
-- Fii pozitiv și scurt. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
+- Răspunde doar pe subiecte legate de grădinărit, plante sau agricultură.
 PROMPT;
 }
 
@@ -219,10 +211,9 @@ Salut! Am analizat diagnosticul AI: {$diagnosis}
 Întrebarea ta: {$userMessage}
 
 Instrucțiuni:
-1. Explică diagnosticul pe scurt, cu cuvinte simple.
-2. Dă 2-3 pași concreți de acțiune (emoji dacă se potrivește).
-3. Sfat de prevenire și o încurajare ("Succes cu grădina ta!").
-Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.
+1. Explică simplu diagnosticul.
+2. Oferă 2-3 pași practici (emoji dacă se potrivește).
+3. Adaugă un sfat de prevenire și un mesaj pozitiv.
 PROMPT;
 }
 
@@ -230,11 +221,11 @@ function formatFeatures(array $features) {
     return '• ' . implode("\n• ", array_slice($features, 0, 5));
 }
 
-// --- GPT-4o Integration ---
+// --- GPT Integration ---
 function getGPTResponse($prompt) {
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 10,
+        CURLOPT_TIMEOUT => 12,
         CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
@@ -243,16 +234,11 @@ function getGPTResponse($prompt) {
         ],
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
-            'model' => 'gpt-4o-mini',
+            'model' => 'gpt-4o',
             'messages' => [
-                [
-                    'role' => 'system',
-                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură.'
-                ],
-                [
-                    'role' => 'user',
-                    'content' => $prompt
-                ]
+                ['role' => 'system', 'content' =>
+                    'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, simplu, clar și pozitiv. Nu răspunde la întrebări în afara agriculturii.'],
+                ['role' => 'user', 'content' => $prompt]
             ],
             'temperature' => 0.7,
             'max_tokens' => 600,
@@ -291,6 +277,7 @@ function formatResponse($text) {
     ], $text);
 }
 
+// --- Auto-Training Sample Save ---
 function saveTrainingExample($base64, $label, $note) {
     if (empty($base64)) return;
 
@@ -308,4 +295,10 @@ function saveTrainingExample($base64, $label, $note) {
 
     $csvLine = '"' . addslashes($label) . '","' . addslashes($note) . '","' . addslashes($filename) . '"' . PHP_EOL;
     file_put_contents(__DIR__ . '/data/dataset.csv', $csvLine, FILE_APPEND);
+
+    logEvent('TrainingSaved', ['file' => $filename, 'label' => $label, 'note' => $note]);
+}
+
+function safeJsonEncode($data) {
+    return json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
 }
