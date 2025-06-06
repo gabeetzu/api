@@ -71,14 +71,6 @@ if ($json === false) {
 
 echo $json;
 
-    if ($json === false) {
-        http_response_code(500);
-        echo '{"success":false,"error":"Eroare la formatul JSON"}';
-        exit();
-    }
-
-    echo $json;
-
 } catch (Exception $e) {
     logEvent('Error', $e->getMessage());
     http_response_code(400);
