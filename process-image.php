@@ -101,8 +101,8 @@ function validateImage(&$base64) {
         $base64 = $parts[1];
     }
     $base64 = preg_replace('/[\s\r\n]/', '', $base64);
-    if (strlen($base64) > 5 * 1024 * 1024) throw new Exception('Imagine prea mare (max 5MB)');
-    if (!preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $base64)) throw new Exception('Format imagine invalid');
+    if (strlen($base64) > 5 * 1024 * 1024) throw new Exception('Image too large (max 5MB)');
+    if (!preg_match('/^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/', $base64)) throw new Exception('Invalid image format');
 }
 
 function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
