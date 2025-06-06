@@ -83,11 +83,32 @@ function sanitizeInput($text) {
 }
 
 function validateImage(&$imageBase64) {
+    // Remove data URL prefix if present
+    if (strpos($imageBase64, 'base64,') !== false) {
+        $parts = explode(',', $imageBase64, 2);
+        $imageBase64 = $parts[1];
+    }
+
+    // Remove whitespace and newlines
+    $imageBase64 = preg_replace('/[\s\r\n]/', '', $imageBase64);
+
+    // Validate length and characters
+    $validLength = strlen($imageBase64) % 4 === 0;
+    $validChars = preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $imageBase64);
+
+    if (!$validLength || !$validChars) {
+        throw new Exception('Format imagine invalid');
+    }
+
+    // Validate padding
+    $padCount = substr_count($imageBase64, '=');
+    if ($padCount > 2 || ($padCount > 0 && !preg_match('/=$/', $imageBase64))) {
+        throw new Exception('Format imagine invalid');
+    }
+
+    // Check maximum size
     if (strlen($imageBase64) > 5 * 1024 * 1024) {
         throw new Exception('Imagine prea mare (max 5MB)');
-    }
-    if (!preg_match('/^[a-zA-Z0-9\/+=]+$/', $imageBase64)) {
-        throw new Exception('Format imagine invalid');
     }
 }
 
@@ -100,6 +121,7 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     }
 
     $prompt = buildHybridPrompt(
+        formatFeatures($features),
         formatFeatures($features),
         $userMessage,
         $cnnDiagnosis
