@@ -58,8 +58,42 @@ try {
         trackUsage($pdo, $deviceHash, 'text');
     }
 
-    $prompt = buildPrompt($userMessage, $cnnDiagnosis);
-    $responseText = getGPTResponse($prompt);
+    // Load last messages from DB as array of messages with role/content
+$historyMessages = loadRecentMessages($pdo, $deviceHash, 10);
+
+// System instruction message
+$systemMessage = [
+    'role' => 'system',
+    'content' => <<<PROMPT
+Ești un asistent agronom prietenos și empatic pentru aplicația GospodApp. Vorbești clar și simplu în limba română, ca și cum ai explica unui prieten care are grijă de grădina lui.
+
+Rolul tău este să oferi sfaturi practice, concrete și ușor de urmat pentru probleme legate de plante, culturi, boli și dăunători. Folosește un ton cald, optimist și încurajator.
+
+Dacă nu ai suficiente informații, cere politicos mai multe detalii despre simptomele plantei sau condițiile de creștere, pentru a putea face un diagnostic mai bun.
+
+Oferă recomandări ecologice, sigure și, dacă e cazul, produse aprobate în UE. Evită jargonul tehnic sau explicațiile prea complicate.
+
+Dacă întrebarea nu este legată de agricultură sau grădinărit, explică politicos că poți ajuta doar cu subiecte agricole și sugerează să ceară ajutor în altă parte.
+
+La final, rezumă în câteva puncte scurte ce poate face utilizatorul mai departe.
+
+Răspunde în maxim 5 propoziții clare și utile.
+PROMPT
+];
+
+// Current user message
+$currentUserMessage = ['role' => 'user', 'content' => $userMessage];
+
+// Combine all messages for GPT
+$messagesForGPT = array_merge([$systemMessage], $historyMessages, [$currentUserMessage]);
+
+// Call GPT with messages array instead of a single string prompt
+$responseText = getGPTResponse($messagesForGPT);
+
+// Save user message and assistant reply to DB for context next time
+saveChatMessage($pdo, $deviceHash, $userMessage, true);
+saveChatMessage($pdo, $deviceHash, $responseText, false);
+
 
     if (empty($responseText)) {
         throw new Exception('Răspuns gol de la AI');
@@ -115,7 +149,7 @@ Instrucțiuni:
 PROMPT;
 }
 
-function getGPTResponse($prompt) {
+function getGPTResponse(array $messages) {
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_TIMEOUT => 12,
@@ -128,11 +162,7 @@ function getGPTResponse($prompt) {
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o-mini',
-            'messages' => [
-                ['role' => 'system', 'content' =>
-                    'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, simplu, clar și pozitiv. Nu răspunde la întrebări în afara agriculturii.'],
-                ['role' => 'user', 'content' => $prompt]
-            ],
+            'messages' => $messages,
             'temperature' => 0.7,
             'max_tokens' => 1200,
             'top_p' => 0.9
@@ -145,25 +175,23 @@ function getGPTResponse($prompt) {
     if (!$res) {
         throw new Exception('Eroare la serviciul OpenAI: Nu s-a primit răspuns.');
     }
-
     if ($httpCode !== 200) {
         $errorData = json_decode($res, true);
         $errorMsg = $errorData['error']['message'] ?? 'Eroare necunoscută de la API.';
         throw new Exception("OpenAI API Error ($httpCode): $errorMsg");
     }
-
     $data = json_decode($res, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
         throw new Exception('Răspuns JSON invalid de la OpenAI: ' . json_last_error_msg());
     }
-
     if (empty($data['choices'][0]['message']['content'])) {
         throw new Exception('Răspuns invalid de la AI: conținut lipsă.');
     }
-
     $raw = $data['choices'][0]['message']['content'];
     return formatResponse($raw);
 }
+
+
 
 function formatResponse($text) {
     return preg_replace([
@@ -209,6 +237,34 @@ function getInputData() {
         return is_array($data) ? $data : [];
     }
     return $_POST;
+}
+
+function loadRecentMessages($pdo, $deviceHash, $limit = 10) {
+    $sql = "SELECT message_text, is_user_message FROM chat_history WHERE device_hash = :device_hash ORDER BY created_at DESC LIMIT :limit";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':device_hash', $deviceHash, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $messages = [];
+    foreach (array_reverse($rows) as $row) { // Reverse to oldest first
+        $messages[] = [
+            'role' => $row['is_user_message'] ? 'user' : 'assistant',
+            'content' => $row['message_text']
+        ];
+    }
+    return $messages;
+}
+
+function saveChatMessage($pdo, $deviceHash, $messageText, $isUserMessage) {
+    $sql = "INSERT INTO chat_history (device_hash, message_text, is_user_message, created_at) VALUES (:device_hash, :message_text, :is_user_message, NOW())";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':device_hash' => $deviceHash,
+        ':message_text' => $messageText,
+        ':is_user_message' => $isUserMessage ? 1 : 0
+    ]);
 }
 
 
