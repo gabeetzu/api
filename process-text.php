@@ -40,25 +40,27 @@ try {
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
 
     if (!empty($imageBase64)) {
-        validateImage($imageBase64);
-        $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
-    } elseif (!empty($cnnDiagnosis)) {
-        $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
-    } elseif (!empty($userMessage)) {
-        $treatment = getGPTResponse($userMessage);
-    } else {
-        throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
-    }
+    validateImage($imageBase64);
+    $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+} elseif (!empty($cnnDiagnosis)) {
+    $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
+} elseif (!empty($userMessage)) {
+    // ✅ Force return to be an object with text/raw
+    $response = getGPTResponse($userMessage);
+    $treatment = is_array($response) ? $response : ['text' => $response, 'raw' => $response];
+} else {
+    throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
+}
 
     if ($treatment === null) {
         throw new Exception('Răspuns gol de la AI');
     }
 
     echo safeJsonEncode([
-        'success' => true,
-        'response_id' => bin2hex(random_bytes(6)),
-        'response' => $treatment
-    ]);
+    'success' => true,
+    'response_id' => bin2hex(random_bytes(6)),
+    'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
+]);
 
 } catch (Exception $e) {
     http_response_code(400);
