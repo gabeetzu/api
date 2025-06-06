@@ -35,12 +35,13 @@ try {
     }
 
     echo json_encode([
-        'success' => true,
-        'response_id' => bin2hex(random_bytes(6)),
-        'response' => $treatment
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    'success' => true,
+    'response_id' => bin2hex(random_bytes(6)),
+    'response' => is_string($treatment) ? ['text' => $treatment] : $treatment
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 } catch (Exception $e) {
+    error_log('[GospodApp AI Error] ' . $e->getMessage()); // Logs to PHP error log
     http_response_code(400);
     echo json_encode([
         'success' => false,
@@ -165,7 +166,7 @@ function buildHybridPrompt($features, $userMessage, $cnnDiagnosis) {
 Ești un asistent agronom prietenos pentru aplicația GospodApp. Răspunde în limba română clar și empatic.
 
 Context: 
-- Diagnostic model AI: {$cnnDiagnosis}
+- Diagnostic model AI: {$cnnDiagnosis ?: 'Nespecificat'}
 - Simptome vizuale: {$features}
 - Întrebare de la utilizator: {$userMessage}
 
@@ -205,6 +206,7 @@ function formatFeatures(array $features) {
 function getGPTResponse($prompt) {
     $ch = curl_init();
     curl_setopt_array($ch, [
+        CURLOPT_TIMEOUT => 10, // seconds
         CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
@@ -217,7 +219,7 @@ function getGPTResponse($prompt) {
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură. Dacă întrebarea nu are legătură cu plante, grădinărit sau agricultură, explică politicos că poți răspunde doar la astfel de subiecte.'
+                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, pe înțelesul tuturor, folosind un ton prietenos și exemple practice. Nu răspunde la întrebări care nu țin de plante, grădinărit sau agricultură.'
                 ],
                 [
                     'role' => 'user',
@@ -240,7 +242,11 @@ function getGPTResponse($prompt) {
         throw new Exception('Răspuns invalid de la AI');
     }
 
-    return formatResponse($data['choices'][0]['message']['content']);
+    $raw = $data['choices'][0]['message']['content'];
+    return [
+        'text' => formatResponse($raw),
+        'raw' => $raw
+    ];
 }
 
 function formatResponse($text) {
