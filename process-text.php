@@ -98,12 +98,9 @@ function sanitizeInput($text) {
     return mb_substr($clean, 0, 300);
 }
 
-function validateImage(&$imageBase64) {
-    if (strlen($imageBase64) > 5 * 1024 * 1024) {
-        throw new Exception('Imagine prea mare (max 5MB)');
-    }
-    if (!preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $imageBase64)) {
-        throw new Exception('Format imagine invalid');
+function validateImage(&$base64) {
+    if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
+        throw new Exception('Imagine prea mare sau format invalid');
     }
 }
 
@@ -204,11 +201,6 @@ function cleanForTTS($text) {
 // ====================
 // VALIDATION & HELPERS
 // ====================
-function validateImage($base64) {
-    if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
-        throw new Exception('Imagine invalidă');
-    }
-}
 
 function validateTextInput($message) {
     if (empty($message) || strlen($message) > 2000) {
