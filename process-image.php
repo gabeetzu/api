@@ -5,23 +5,31 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
-// --- CORS Preflight ---
+function logEvent($label, $data) {
+    $dir = '/var/data/logs';
+    if (!file_exists($dir)) mkdir($dir, 0775, true);
+    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    file_put_contents($dir . '/activity.log', $line, FILE_APPEND);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
-// --- API Key Check ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 if (!hash_equals($expectedKey, $apiKey)) {
+    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
-    die(json_encode(['success' => false, 'error' => 'Acces neautorizat'], JSON_UNESCAPED_UNICODE));
+    echo json_encode(['success' => false, 'error' => 'Acces neautorizat']);
+    exit();
 }
 
-// --- Main Execution ---
 try {
     $input = getInputData();
+    logEvent('ImageInput', $input);
+
     $imageBase64 = $input['image'] ?? '';
     $userMessage = sanitizeInput($input['message'] ?? '');
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
@@ -37,13 +45,15 @@ try {
         throw new Exception('Date lipsă: trimiteți o imagine, un diagnostic sau un mesaj.');
     }
 
+    logEvent('ImageResponse', $response);
     echo json_encode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
         'response' => is_string($response) ? ['text' => $response, 'raw' => $response] : $response
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 } catch (Exception $e) {
+    logEvent('Error', $e->getMessage());
     http_response_code(400);
     echo json_encode([
         'success' => false,
@@ -51,7 +61,6 @@ try {
     ], JSON_UNESCAPED_UNICODE);
 }
 
-// --- Helpers & Core Logic ---
 function getInputData() {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'application/json') !== false) {
@@ -101,8 +110,10 @@ function runYoloFallback($base64) {
     $cmd = escapeshellcmd("python3 yolo_infer.py " . escapeshellarg($tmp));
     $output = shell_exec($cmd);
     if (!$output) return ["Analiza alternativă a eșuat"];
+
     $data = json_decode($output, true);
-    return isset($data['label']) ? [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"] : ["YOLO nu a detectat nimic clar"];
+    if (!is_array($data) || !isset($data['label'])) return ["YOLO nu a returnat etichete valide"];
+    return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
 }
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
