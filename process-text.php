@@ -63,7 +63,14 @@ try {
     }
 
     logEvent('TextResponse', $response);
-    echo jsonResponse(true, $response);
+    echo json_encode([
+    'success' => true,
+    'response' => [
+        'text' => $response['text'],
+        'raw' => $response['raw']
+    ]
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
 
 } catch (Exception $e) {
     logEvent('TextError', $e->getMessage());
@@ -117,9 +124,7 @@ function formatResponse($text) {
 function jsonResponse($success, $payload) {
     return json_encode([
         'success' => $success,
-        'response_id' => bin2hex(random_bytes(5)),
-        'response' => $success ? $payload : null,
-        'error' => $success ? null : $payload
+        'response' => $payload
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
