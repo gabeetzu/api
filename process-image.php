@@ -30,23 +30,28 @@ try {
         $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
     } elseif (!empty($cnnDiagnosis)) {
         $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
+    } elseif (!empty($userMessage)) {
+        $treatment = getGPTResponse($userMessage); // ✅ FIXED HERE
     } else {
-        throw new Exception('Date lipsă: Trimiteți o imagine sau un diagnostic');
+        throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
     }
 
-    echo json_encode([
+    if ($treatment === null) {
+        throw new Exception('Răspuns gol de la AI');
+    }
+
+    echo safeJsonEncode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
-        'response' => is_string($treatment) ? ['text' => $treatment] : $treatment
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
+    ]);
 
 } catch (Exception $e) {
-    error_log('[GospodApp AI Error] ' . $e->getMessage());
     http_response_code(400);
-    echo json_encode([
+    echo safeJsonEncode([
         'success' => false,
         'error' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE);
+    ]);
 }
 
 // --- Helper Functions ---
@@ -74,23 +79,27 @@ function validateImage(&$imageBase64) {
     }
 }
 
-// --- Image Analysis Pipeline ---
 function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
 
-// 🔁 If Vision fails, try YOLO fallback
-if (empty($features) || (count($features) === 1 && str_contains($features[0], 'Nu s-au detectat'))) {
-    $features = runYoloFallback($imageBase64);
-}
-    
+    if (empty($features) || (count($features) === 1 && str_contains($features[0], 'Nu s-au detectat'))) {
+        $features = runYoloFallback($imageBase64);
+    }
+
     $prompt = buildHybridPrompt(
         formatFeatures($features),
         $userMessage,
         $cnnDiagnosis
     );
-    
+
     $response = getGPTResponse($prompt);
+
+    // ✅ Save training data
+    saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
+
+    return $response;
+}
 
 function runYoloFallback($base64) {
     $tmp = __DIR__ . '/temp_yolo.jpg';
