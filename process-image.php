@@ -40,7 +40,27 @@ try {
 
     if (!empty($imageBase64)) {
         validateImage($imageBase64);
-        $response = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+
+        // Updated: handleImageAnalysis returns array with text + hasFeatures flag
+        $imageResult = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+        $response = $imageResult['text'];
+        $hasFeatures = $imageResult['hasFeatures'];
+
+        // Check for uncertainty keywords in GPT response
+        $uncertaintyWords = ['nu pot identifica', 'te rog descrie', 'nu sunt sigur', 'mai multe detalii', 'nu am suficiente informații'];
+        $isUncertain = false;
+        foreach ($uncertaintyWords as $word) {
+            if (stripos($response, $word) !== false) {
+                $isUncertain = true;
+                break;
+            }
+        }
+
+        if ($hasFeatures && $isUncertain) {
+            // Ask user to describe symptoms instead of sending another photo
+            $response = "Salut! Am observat câteva indicii în imagine, dar am nevoie de ajutorul tău. Te rog să descrii ce vezi la plantă (ex: pete, culoare, textură).";
+        }
+
     } elseif (!empty($cnnDiagnosis)) {
         $response = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
     } elseif (!empty($userMessage)) {
@@ -51,25 +71,25 @@ try {
 
     logEvent('ImageResponse', ['preview' => mb_substr($response, 0, 100)]);
     // Ensure consistent response structure
-$responseData = is_string($response) ? $response : ($response['text'] ?? 'Răspuns invalid');
-$rawData = is_string($response) ? $response : ($response['raw'] ?? $responseData);
+    $responseData = is_string($response) ? $response : ($response['text'] ?? 'Răspuns invalid');
+    $rawData = is_string($response) ? $response : ($response['raw'] ?? $responseData);
 
-$json = json_encode([
-    'success' => true,
-    'response_id' => bin2hex(random_bytes(6)),
-    'response' => [
-        'text' => $responseData,
-        'raw' => $rawData
-    ]
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $json = json_encode([
+        'success' => true,
+        'response_id' => bin2hex(random_bytes(6)),
+        'response' => [
+            'text' => $responseData,
+            'raw' => $rawData
+        ]
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-if ($json === false) {
-    http_response_code(500);
-    echo '{"success":false,"error":"Eroare la formatul JSON"}';
-    exit();
-}
+    if ($json === false) {
+        http_response_code(500);
+        echo '{"success":false,"error":"Eroare la formatul JSON"}';
+        exit();
+    }
 
-echo $json;
+    echo $json;
 
 } catch (Exception $e) {
     logEvent('Error', $e->getMessage());
@@ -109,8 +129,10 @@ function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($base64);
     $features = extractVisualFeatures($visionData);
 
-    // If Vision fails or is weak, fallback to TFLite diagnosis (already coming from Android client)
-    if (empty($features)) {
+    // Check if features are meaningful
+    $hasFeatures = !empty($features) && !in_array("Nu s-au detectat caracteristici clare", $features);
+
+    if (!$hasFeatures) {
         $features = ["Nu s-au detectat semne clare pe imagine"];
     }
 
@@ -121,8 +143,11 @@ function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
     );
 
     $result = getGPTResponse($prompt);
+
     saveTrainingExample($base64, $cnnDiagnosis, $userMessage);
-    return $result;
+
+    // Return both the GPT response and whether features were detected
+    return ['text' => $result, 'hasFeatures' => $hasFeatures];
 }
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
@@ -191,7 +216,7 @@ Instrucțiuni:
 3. Oferă 2-3 pași concreți (cu emoji dacă e cazul, ex: 💧☀️✂️).
 4. Sugerează un produs (numai dacă e aprobat UE).
 5. Încheie cu un sfat de prevenire + încurajare („Succes cu grădina ta!”)
-6. Dacă nu ai destule informații, cere detalii în plus.
+6. Dacă nu ai destule informații sau nu poți identifica clar problema, roagă utilizatorul să descrie simptomele vizuale (ex: pete, schimbări de culoare, textura).
 
 Reguli:
 - Fără liste lungi sau termeni științifici.
