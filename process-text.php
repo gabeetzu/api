@@ -5,6 +5,14 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
+// --- Logging ---
+function logEvent($label, $data) {
+    $dir = '/var/data/logs';
+    if (!file_exists($dir)) mkdir($dir, 0775, true);
+    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    file_put_contents($dir . '/activity.log', $line, FILE_APPEND);
+}
+
 // --- Handle preflight CORS ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -15,6 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 if (!hash_equals($expectedKey, $apiKey)) {
+    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
     die(safeJsonEncode(['success' => false, 'error' => 'Acces neautorizat']));
 }
@@ -28,118 +37,58 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 } catch (Exception $e) {
-    error_log("DB error: " . $e->getMessage());
+    logEvent('DBError', $e->getMessage());
     http_response_code(500);
     die(safeJsonEncode(['success' => false, 'error' => 'Service unavailable']));
 }
 
+// --- Main Logic ---
 try {
     $input = getInputData();
+    logEvent('TextInput', $input);
+
     $imageBase64 = $input['image'] ?? '';
     $userMessage = sanitizeInput($input['message'] ?? '');
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
+    $deviceHash = sanitizeInput($input['device_hash'] ?? '');
+
+    if (!empty($deviceHash)) {
+        validateDeviceHash($deviceHash);
+        logEvent('Device', $deviceHash);
+        trackUsage($pdo, $deviceHash, 'text');
+    }
 
     if (!empty($imageBase64)) {
-    validateImage($imageBase64);
-    $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
-} elseif (!empty($cnnDiagnosis)) {
-    $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
-} elseif (!empty($userMessage)) {
-    // ✅ Force return to be an object with text/raw
-    echo safeJsonEncode([
-    'success' => true,
-    'response_id' => bin2hex(random_bytes(6)),
-    'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
-]);
-
-} else {
-    throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
-}
+        validateImage($imageBase64);
+        $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+    } elseif (!empty($cnnDiagnosis)) {
+        $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
+    } elseif (!empty($userMessage)) {
+        $treatment = getGPTResponse($userMessage);
+    } else {
+        throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
+    }
 
     if ($treatment === null) {
         throw new Exception('Răspuns gol de la AI');
     }
 
+    logEvent('TextResponse', $treatment);
     echo safeJsonEncode([
-    'success' => true,
-    'response_id' => bin2hex(random_bytes(6)),
-    'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
-]);
+        'success' => true,
+        'response_id' => bin2hex(random_bytes(6)),
+        'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
+    ]);
 
 } catch (Exception $e) {
+    logEvent('Error', $e->getMessage());
     http_response_code(400);
     echo safeJsonEncode([
         'success' => false,
         'error' => $e->getMessage()
     ]);
 }
-
-// --- Helper Functions ---
-function safeJsonEncode($data) {
-    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($json === false) {
-        http_response_code(500);
-        exit(json_encode([
-            'success' => false,
-            'error' => 'Eroare internă: ' . json_last_error_msg()
-        ]));
-    }
-    return $json;
-}
-
-function getInputData() {
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (stripos($contentType, 'application/json') !== false) {
-        $data = json_decode(file_get_contents('php://input'), true);
-        return is_array($data) ? $data : [];
-    }
-    return $_POST;
-}
-
-function sanitizeInput($text) {
-    $clean = trim(strip_tags($text));
-    $clean = preg_replace('/[^\p{L}\p{N}\s.,;:!?()-]/u', '', $clean);
-    return mb_substr($clean, 0, 300);
-}
-
-function validateImage(&$base64) {
-    if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
-        throw new Exception('Imagine prea mare sau format invalid');
-    }
-}
-
-// --- Processing Functions ---
-function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
-    $visionData = analyzeImageWithVisionAPI($imageBase64);
-    $features = extractVisualFeatures($visionData);
-    $prompt = buildHybridPrompt(
-        formatFeatures($features),
-        $userMessage,
-        $cnnDiagnosis
-    );
-    return getGPTResponse($prompt);
-}
-
-function handleCnnDiagnosis($diagnosis, $userMessage) {
-    $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
-    return getGPTResponse($prompt);
-}
-
-function formatResponse($text) {
-    return preg_replace([
-        '/##\s+/',
-        '/\*\*(.*?)\*\*/',
-        '/<tratament>/i',
-        '/<prevenire>/i'
-    ], [
-        '🔸 ',
-        '$1',
-        '💊 Tratament:',
-        '🛡 Prevenire:'
-    ], $text);
-}
-
-// --- GPT Response Handler ---
+// --- GPT Integration ---
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
@@ -157,16 +106,13 @@ function getGPTResponse($prompt) {
                     'content' => "Ești un asistent agronom inteligent în aplicația GospodApp. 
 Răspunzi în limba română, clar și prietenos, folosind termeni simpli pentru grădinari amatori sau persoane în vârstă.
 
-Dacă utilizatorul trimite un diagnostic vizual (ex: frunză cu pete, mucegai, larve), oferă:
+Dacă utilizatorul trimite un diagnostic vizual, oferă:
 • cauze posibile
 • tratamente naturale recomandate
 • metode de prevenție
 • sfaturi de monitorizare
 
-Dacă nu e clar ce boală e, sugerează pași pentru identificare: descriere miros, textură, evoluție în timp etc.
-
-Evită recomandări chimice agresive, încurajează metode ecologice și practice.
-Nu menționa că ești AI. Nu folosi expresii tehnice fără explicații."
+Evită recomandări chimice agresive, încurajează metode ecologice și practice."
                 ],
                 [
                     'role' => 'user',
@@ -188,37 +134,58 @@ Nu menționa că ești AI. Nu folosi expresii tehnice fără explicații."
         throw new Exception('Răspuns invalid de la AI');
     }
 
-    $rawContent = $data['choices'][0]['message']['content'];
+    $raw = $data['choices'][0]['message']['content'];
     return [
-        'text' => formatResponse($rawContent),
-        'raw' => $rawContent
+        'text' => formatResponse($raw),
+        'raw' => $raw
     ];
 }
 
-// ====================
-// RESPONSE FORMATTING
-// ====================
-function formatForDisplay($text) {
-    $text = preg_replace('/\*\*Observații:\*\*/', "🔍 Observații\n", $text);
-    $text = preg_replace('/\*\*Cauze posibile:\*\*/', "🦠 Cauze posibile\n", $text);
-    $text = preg_replace('/\*\*Recomandări:\*\*/', "💡 Recomandări\n", $text);
-    $text = preg_replace('/\*\*Monitorizare:\*\*/', "👀 Monitorizare\n", $text);
-    return str_replace('•', "• ", $text);
+function formatResponse($text) {
+    return preg_replace([
+        '/##\s+/',
+        '/\*\*(.*?)\*\*/',
+        '/<tratament>/i',
+        '/<prevenire>/i'
+    ], [
+        '🔸 ',
+        '$1',
+        '💊 Tratament:',
+        '🛡 Prevenire:'
+    ], $text);
 }
 
-function cleanForTTS($text) {
-    $text = strip_tags($text);
-    $text = preg_replace('/\*\*.*?\*\*/', '', $text);
-    $text = preg_replace('/[\n\r]+/', '. ', $text);
-    $text = preg_replace('/•\s*/', '', $text);
-    $text = preg_replace('/\d+\.\s*/', '', $text);
-    $text = preg_replace('/\s+/', ' ', $text);
-    return trim($text);
+function getInputData() {
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (stripos($contentType, 'application/json') !== false) {
+        $data = json_decode(file_get_contents('php://input'), true);
+        return is_array($data) ? $data : [];
+    }
+    return $_POST;
 }
 
-// ====================
-// VALIDATION & HELPERS
-// ====================
+function sanitizeInput($text) {
+    $clean = trim(strip_tags($text));
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,;:!?()-]/u', '', $clean);
+    return mb_substr($clean, 0, 300);
+}
+function safeJsonEncode($data) {
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        http_response_code(500);
+        exit(json_encode([
+            'success' => false,
+            'error' => 'Eroare internă: ' . json_last_error_msg()
+        ]));
+    }
+    return $json;
+}
+
+function validateImage(&$base64) {
+    if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
+        throw new Exception('Imagine prea mare sau format invalid');
+    }
+}
 
 function validateTextInput($message) {
     if (empty($message) || strlen($message) > 2000) {
