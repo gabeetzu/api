@@ -50,11 +50,26 @@ try {
     }
 
     logEvent('ImageResponse', ['preview' => mb_substr($response, 0, 100)]);
-    $json = json_encode([
+    // Ensure consistent response structure
+$responseData = is_string($response) ? $response : ($response['text'] ?? 'Răspuns invalid');
+$rawData = is_string($response) ? $response : ($response['raw'] ?? $responseData);
+
+$json = json_encode([
     'success' => true,
     'response_id' => bin2hex(random_bytes(6)),
-    'response' => $response  // now a flat string
+    'response' => [
+        'text' => $responseData,
+        'raw' => $rawData
+    ]
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+if ($json === false) {
+    http_response_code(500);
+    echo '{"success":false,"error":"Eroare la formatul JSON"}';
+    exit();
+}
+
+echo $json;
 
     if ($json === false) {
         http_response_code(500);
