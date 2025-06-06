@@ -59,39 +59,63 @@ try {
     }
 
     $prompt = buildPrompt($userMessage, $cnnDiagnosis);
-    $response = getGPTResponse($prompt);
+    $responseText = getGPTResponse($prompt);
 
-    if (!$response || empty($response['text'])) {
+    if (empty($responseText)) {
         throw new Exception('Răspuns gol de la AI');
     }
 
-    logEvent('TextResponse', $response);
+    $formattedText = formatResponse($responseText);
+    
+    logEvent('TextResponse', ['length' => strlen($formattedText)]);
+    
+    // Consistent response structure
     echo json_encode([
-    'success' => true,
-    'response' => [
-        'text' => $response['text'],
-        'raw' => $response['raw']
-    ]
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
+        'success' => true,
+        'response_id' => bin2hex(random_bytes(6)),
+        'response' => [
+            'text' => $formattedText,
+            'raw' => $responseText
+        ]
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 } catch (Exception $e) {
     logEvent('TextError', $e->getMessage());
     http_response_code(400);
     echo jsonResponse(false, $e->getMessage());
 }
+
+// --- Helper Functions ---
 function buildPrompt($userMessage, $diagnosis) {
     if (!empty($diagnosis)) {
-        return "Diagnostic AI: $diagnosis\nÎntrebarea utilizatorului: $userMessage\n\nInstrucțiuni:\n- Explică simplu problema.\n- Oferă 2-3 pași ecologici.\n- Încheie pozitiv.";
+        return <<<PROMPT
+Diagnostic AI: $diagnosis
+Întrebarea utilizatorului: $userMessage
+
+Instrucțiuni:
+- Explică simplu problema în română
+- Oferă 2-3 pași ecologici și practici
+- Încheie cu un mesaj pozitiv și încurajator
+- Răspunde doar la întrebări despre plante și grădinărit
+PROMPT;
     }
-    return $userMessage;
+    
+    return <<<PROMPT
+Întrebarea utilizatorului: $userMessage
+
+Instrucțiuni:
+- Răspunde în română, simplu și clar
+- Oferă sfaturi practice pentru grădinărit
+- Folosește emoji unde e potrivit
+- Dacă întrebarea nu e despre plante, explică politicos că poți ajuta doar cu grădinăritul
+PROMPT;
 }
 
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
     curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 10,               // Total request timeout
-        CURLOPT_CONNECTTIMEOUT => 5,         // Time to connect before giving up
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: application/json',
@@ -101,36 +125,53 @@ function getGPTResponse($prompt) {
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' =>
-                    'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde simplu, clar și ecologic. Nu aborda subiecte în afara agriculturii.'],
+                [
+                    'role' => 'system', 
+                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde simplu, clar și pozitiv în română. Nu aborda subiecte în afara agriculturii și grădinăritului.'
+                ],
                 ['role' => 'user', 'content' => $prompt]
             ],
-            'temperature' => 0.4,
-            'max_tokens' => 500
+            'temperature' => 0.7,
+            'max_tokens' => 600,
+            'top_p' => 0.9
         ])
     ]);
 
-    $res = curl_exec($ch);
-    if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
-        throw new Exception('Eroare serviciu OpenAI');
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    if (!$response || $httpCode !== 200) {
+        throw new Exception('Eroare serviciu OpenAI (HTTP: ' . $httpCode . ')');
     }
-    $data = json_decode($res, true);
-    $text = $data['choices'][0]['message']['content'] ?? '';
-    'response' => $response
+    
+    $data = json_decode($response, true);
+    if (empty($data['choices'][0]['message']['content'])) {
+        throw new Exception('Răspuns invalid de la AI');
+    }
+    
+    return $data['choices'][0]['message']['content'];
 }
 
 function formatResponse($text) {
     return preg_replace([
-        '/##\s+/', '/\*\*(.*?)\*\*/', '/<tratament>/i', '/<prevenire>/i'
+        '/##\s+/', 
+        '/\*\*(.*?)\*\*/', 
+        '/<tratament>/i', 
+        '/<prevenire>/i'
     ], [
-        '🔸 ', '$1', '💊 Tratament:', '🛡 Prevenire:'
+        '🔸 ', 
+        '$1', 
+        '💊 Tratament:', 
+        '🛡 Prevenire:'
     ], $text);
 }
 
 function jsonResponse($success, $payload) {
     return json_encode([
         'success' => $success,
-        'response' => $payload
+        'error' => $success ? null : $payload,
+        'response' => $success ? $payload : null
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
@@ -138,18 +179,23 @@ function logEvent($label, $data) {
     $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
     $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
-    file_put_contents($dir . '/activity.log', $line, FILE_APPEND);
+    file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
 }
 
 function getInputData() {
-    $ct = $_SERVER['CONTENT_TYPE'] ?? '';
-    $json = file_get_contents('php://input');
-    return (stripos($ct, 'application/json') !== false) ? json_decode($json, true) ?? [] : $_POST;
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (stripos($contentType, 'application/json') !== false) {
+        $json = file_get_contents('php://input');
+        $data = json_decode($json, true);
+        return is_array($data) ? $data : [];
+    }
+    return $_POST;
 }
 
-function sanitizeInput($txt) {
-    $clean = trim(strip_tags($txt));
-    return mb_substr(preg_replace('/[^\p{L}\p{N}\s.,!?-]/u', '', $clean), 0, 300);
+function sanitizeInput($text) {
+    $clean = trim(strip_tags($text));
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()-]/u', '', $clean);
+    return mb_substr($clean, 0, 300);
 }
 
 function validateDeviceHash($hash) {
@@ -158,20 +204,22 @@ function validateDeviceHash($hash) {
     }
 }
 
-function trackUsage($pdo, $hash, $type) {
+function trackUsage($pdo, $deviceHash, $type) {
     $today = date('Y-m-d');
     $now = date('Y-m-d H:i:s');
+    
     $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
-    $stmt->execute([$hash, $today]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([$deviceHash, $today]);
+    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($row) {
-        $col = $type === 'image' ? 'image_count' : 'text_count';
-        $stmt = $pdo->prepare("UPDATE usage_tracking SET $col = $col + 1, last_request = ? WHERE id = ?");
-        $stmt->execute([$now, $row['id']]);
+    if ($usage) {
+        $field = ($type === 'image') ? 'image_count' : 'text_count';
+        $stmt = $pdo->prepare("UPDATE usage_tracking SET $field = $field + 1, last_request = ? WHERE id = ?");
+        $stmt->execute([$now, $usage['id']]);
     } else {
-        $col = $type === 'image' ? 'image_count' : 'text_count';
-        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $col, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
-        $stmt->execute([$hash, $today, $now, $now]);
+        $field = ($type === 'image') ? 'image_count' : 'text_count';
+        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $field, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
+        $stmt->execute([$deviceHash, $today, $now, $now]);
     }
 }
+?>
