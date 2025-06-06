@@ -8,154 +8,141 @@ mb_internal_encoding("UTF-8");
 ini_set('display_errors', 0);
 error_reporting(0);
 
-
-function logEvent($label, $data) {
-    $dir = __DIR__ . '/logs';
-    if (!file_exists($dir)) mkdir($dir, 0775, true);
-    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
-    file_put_contents($dir . '/activity.log', $line, FILE_APPEND);
-}
-
+// --- CORS Preflight ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
+// --- API Key Validation ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 if (!hash_equals($expectedKey, $apiKey)) {
     logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Acces neautorizat']);
+    echo jsonResponse(false, 'Acces neautorizat');
     exit();
 }
 
+// --- Database Connection ---
+try {
+    $pdo = new PDO(
+        "mysql:host=" . getenv('DB_HOST') . ";dbname=" . getenv('DB_NAME') . ";charset=utf8mb4",
+        getenv('DB_USER'),
+        getenv('DB_PASS'),
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+} catch (Exception $e) {
+    logEvent('DBError', $e->getMessage());
+    http_response_code(500);
+    echo jsonResponse(false, 'Eroare conexiune la baza de date');
+    exit();
+}
+
+// --- Main Logic ---
 try {
     $input = getInputData();
-    logEvent('ImageInput', $input);
+    logEvent('Input', $input);
 
-    $imageBase64 = $input['image'] ?? '';
     $userMessage = sanitizeInput($input['message'] ?? '');
+    $imageBase64 = $input['image'] ?? '';
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
+    $deviceHash = sanitizeInput($input['device_hash'] ?? '');
 
-    if (!empty($imageBase64)) {
-        validateImage($imageBase64);
-
-        // Updated: handleImageAnalysis returns array with text + hasFeatures flag
-        $imageResult = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
-        $response = $imageResult['text'];
-        $hasFeatures = $imageResult['hasFeatures'];
-
-        // Check for uncertainty keywords in GPT response
-        $uncertaintyWords = ['nu pot identifica', 'te rog descrie', 'nu sunt sigur', 'mai multe detalii', 'nu am suficiente informații'];
-        $isUncertain = false;
-        foreach ($uncertaintyWords as $word) {
-            if (stripos($response, $word) !== false) {
-                $isUncertain = true;
-                break;
-            }
-        }
-
-        if ($hasFeatures && $isUncertain) {
-            // Ask user to describe symptoms instead of sending another photo
-            $response = "Salut! Am observat câteva indicii în imagine, dar am nevoie de ajutorul tău. Te rog să descrii ce vezi la plantă (ex: pete, culoare, textură).";
-        }
-
-    } elseif (!empty($cnnDiagnosis)) {
-        $response = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
-    } elseif (!empty($userMessage)) {
-        $response = getGPTResponse($userMessage);
-    } else {
-        throw new Exception('Date lipsă: trimiteți o imagine, un diagnostic sau un mesaj.');
+    if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
+        throw new Exception('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.');
     }
 
-    logEvent('ImageResponse', ['preview' => mb_substr($response, 0, 100)]);
-    // Ensure consistent response structure
-    $responseData = is_string($response) ? $response : ($response['text'] ?? 'Răspuns invalid');
-    $rawData = is_string($response) ? $response : ($response['raw'] ?? $responseData);
+    if (!empty($deviceHash)) {
+        validateDeviceHash($deviceHash);
+        logEvent('Device', $deviceHash);
+    }
 
-    $json = json_encode([
+    // Track usage for text or image
+    if (!empty($imageBase64)) {
+        trackUsage($pdo, $deviceHash, 'image');
+    } else {
+        trackUsage($pdo, $deviceHash, 'text');
+    }
+
+    // Load conversation history (last 10 messages)
+    $historyMessages = loadRecentMessages($pdo, $deviceHash, 10);
+
+    // System instruction for GPT
+    $systemMessage = [
+        'role' => 'system',
+        'content' => <<<PROMPT
+Ești un asistent agronom prietenos și empatic pentru aplicația GospodApp. Vorbești clar și simplu în limba română, ca și cum ai explica unui prieten care are grijă de grădina lui.
+
+Rolul tău este să oferi sfaturi practice, concrete și ușor de urmat pentru probleme legate de plante, culturi, boli și dăunători. Folosește un ton cald, optimist și încurajator.
+
+Dacă nu ai suficiente informații, cere politicos mai multe detalii despre simptomele plantei sau condițiile de creștere, pentru a putea face un diagnostic mai bun.
+
+Oferă recomandări ecologice, sigure și, dacă e cazul, produse aprobate în UE. Evită jargonul tehnic sau explicațiile prea complicate.
+
+Dacă întrebarea nu este legată de agricultură sau grădinărit, explică politicos că poți ajuta doar cu subiecte agricole și sugerează să ceară ajutor în altă parte.
+
+La final, rezumă în câteva puncte scurte ce poate face utilizatorul mai departe.
+
+Răspunde în maxim 5 propoziții clare și utile.
+PROMPT
+    ];
+
+    // Prepare user content for GPT input
+    if (!empty($cnnDiagnosis)) {
+        // If diagnosis provided, prepend to user message
+        $userContent = "Diagnostic AI: $cnnDiagnosis\nÎntrebarea utilizatorului: $userMessage";
+    } else if (!empty($imageBase64)) {
+        // If image, analyze features + include in prompt
+        $features = analyzeImageFeatures($imageBase64);
+        $featuresText = formatFeaturesText($features);
+        $userContent = "$userMessage\n\nSimptome vizuale detectate: $featuresText";
+    } else {
+        $userContent = $userMessage;
+    }
+
+    $currentUserMessage = ['role' => 'user', 'content' => $userContent];
+
+    $messagesForGPT = array_merge([$systemMessage], $historyMessages, [$currentUserMessage]);
+
+    // Call GPT with full conversation context
+    $responseText = getGPTResponse($messagesForGPT);
+
+    // Save user message + GPT response for context next time
+    saveChatMessage($pdo, $deviceHash, $userContent, true);
+    saveChatMessage($pdo, $deviceHash, $responseText, false);
+
+    if (empty($responseText)) {
+        throw new Exception('Răspuns gol de la AI');
+    }
+
+    $formattedText = formatResponse($responseText);
+
+    logEvent('Response', ['length' => strlen($formattedText)]);
+
+    echo json_encode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
         'response' => [
-            'text' => $responseData,
-            'raw' => $rawData
+            'text' => $formattedText,
+            'raw' => $responseText
         ]
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-    if ($json === false) {
-        http_response_code(500);
-        echo '{"success":false,"error":"Eroare la formatul JSON"}';
-        exit();
-    }
-
-    echo $json;
 
 } catch (Exception $e) {
     logEvent('Error', $e->getMessage());
     http_response_code(400);
     echo json_encode([
         'success' => false,
+        'response_id' => bin2hex(random_bytes(6)),
         'error' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE);
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
-function getInputData() {
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (stripos($contentType, 'application/json') !== false) {
-        $json = json_decode(file_get_contents('php://input'), true);
-        return is_array($json) ? $json : [];
-    }
-    return $_POST;
-}
+// --- Helper functions ---
 
-function sanitizeInput($text) {
-    $clean = trim(strip_tags($text));
-    $clean = preg_replace('/[^\p{L}\p{N}\s.,;:!?()-]/u', '', $clean);
-    return mb_substr($clean, 0, 300);
-}
-
-function validateImage(&$base64) {
-    if (strpos($base64, 'base64,') !== false) {
-        $parts = explode(',', $base64, 2);
-        $base64 = $parts[1];
-    }
-    $base64 = preg_replace('/[\s\r\n]/', '', $base64);
-    if (strlen($base64) > 5 * 1024 * 1024) throw new Exception('Image too large (max 5MB)');
-    if (!preg_match('/^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/', $base64)) throw new Exception('Invalid image format');
-}
-
-function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
-    $visionData = analyzeImageWithVisionAPI($base64);
-    $features = extractVisualFeatures($visionData);
-
-    // Check if features are meaningful
-    $hasFeatures = !empty($features) && !in_array("Nu s-au detectat caracteristici clare", $features);
-
-    if (!$hasFeatures) {
-        $features = ["Nu s-au detectat semne clare pe imagine"];
-    }
-
-    $prompt = buildHybridPrompt(
-        formatFeatures($features),
-        $userMessage,
-        $cnnDiagnosis
-    );
-
-    $result = getGPTResponse($prompt);
-
-    saveTrainingExample($base64, $cnnDiagnosis, $userMessage);
-
-    // Return both the GPT response and whether features were detected
-    return ['text' => $result, 'hasFeatures' => $hasFeatures];
-}
-
-function handleCnnDiagnosis($diagnosis, $userMessage) {
-    $prompt = buildCnnBasedPrompt($diagnosis, $userMessage);
-    return getGPTResponse($prompt);
-}
-
-function analyzeImageWithVisionAPI($base64) {
+function analyzeImageFeatures($base64) {
+    // Calls Google Vision API to extract visual labels and colors as features
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
     $body = [
         'requests' => [[
@@ -175,12 +162,9 @@ function analyzeImageWithVisionAPI($base64) {
     $res = @file_get_contents($url, false, $context);
     if (!$res) {
         logEvent('VisionFail', $http_response_header ?? []);
-        throw new Exception('Eroare la analiza imaginii');
+        return [];
     }
-    return json_decode($res, true);
-}
-
-function extractVisualFeatures($data) {
+    $data = json_decode($res, true);
     $features = [];
     $keywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
     foreach ($data['responses'][0]['labelAnnotations'] ?? [] as $label) {
@@ -198,50 +182,15 @@ function extractVisualFeatures($data) {
     if (!empty($colors)) {
         $features[] = "Culori predominante: " . implode(', ', $colors);
     }
-    return $features ?: ["Nu s-au detectat caracteristici clare"];
+    return $features;
 }
 
-function buildHybridPrompt($features, $userMessage, $cnnDiagnosis) {
-    return <<<PROMPT
-Ești un asistent agronom prietenos pentru aplicația GospodApp. Răspunde în limba română clar și empatic.
-
-Context:
-- Diagnostic AI: {$cnnDiagnosis}
-- Simptome vizuale: {$features}
-- Întrebare utilizator: {$userMessage}
-
-Instrucțiuni:
-1. Începe cu o adresare prietenoasă („Salut! Am analizat imaginea ta...”)
-2. Spune clar ce poate avea planta, fără termeni complicați.
-3. Oferă 2-3 pași concreți (cu emoji dacă e cazul, ex: 💧☀️✂️).
-4. Sugerează un produs (numai dacă e aprobat UE).
-5. Încheie cu un sfat de prevenire + încurajare („Succes cu grădina ta!”)
-6. Dacă nu ai destule informații sau nu poți identifica clar problema, roagă utilizatorul să descrie simptomele vizuale (ex: pete, schimbări de culoare, textura).
-
-Reguli:
-- Fără liste lungi sau termeni științifici.
-- Max. 5 propoziții.
-- Răspunde doar pe subiecte legate de grădinărit, plante sau agricultură.
-PROMPT;
+function formatFeaturesText(array $features) {
+    if (empty($features)) return "Nu s-au detectat caracteristici clare.";
+    return implode(", ", array_slice($features, 0, 5));
 }
 
-function buildCnnBasedPrompt($diagnosis, $userMessage) {
-    return <<<PROMPT
-Salut! Am analizat diagnosticul AI: {$diagnosis}
-Întrebarea ta: {$userMessage}
-
-Instrucțiuni:
-1. Explică simplu diagnosticul.
-2. Oferă 2-3 pași practici (emoji dacă se potrivește).
-3. Adaugă un sfat de prevenire și un mesaj pozitiv.
-PROMPT;
-}
-
-function formatFeatures(array $features) {
-    return '• ' . implode("\n• ", array_slice($features, 0, 5));
-}
-
-function getGPTResponse($prompt) {
+function getGPTResponse(array $messages) {
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_TIMEOUT => 12,
@@ -254,44 +203,139 @@ function getGPTResponse($prompt) {
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o-mini',
-            'messages' => [
-                ['role' => 'system', 'content' =>
-                    'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, simplu, clar și pozitiv. Nu răspunde la întrebări în afara agriculturii.'],
-                ['role' => 'user', 'content' => $prompt]
-            ],
+            'messages' => $messages,
             'temperature' => 0.7,
             'max_tokens' => 1200,
             'top_p' => 0.9
         ])
     ]);
     $res = curl_exec($ch);
-    if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
-        curl_close($ch);
-        throw new Exception('Eroare la serviciul OpenAI');
-    }
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+
+    if (!$res) {
+        throw new Exception('Eroare la serviciul OpenAI: Nu s-a primit răspuns.');
+    }
+    if ($httpCode !== 200) {
+        $errorData = json_decode($res, true);
+        $errorMsg = $errorData['error']['message'] ?? 'Eroare necunoscută de la API.';
+        throw new Exception("OpenAI API Error ($httpCode): $errorMsg");
+    }
     $data = json_decode($res, true);
-    if (empty($data['choices'][0]['message']['content'])) throw new Exception('Răspuns invalid de la AI');
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('Răspuns JSON invalid de la OpenAI: ' . json_last_error_msg());
+    }
+    if (empty($data['choices'][0]['message']['content'])) {
+        throw new Exception('Răspuns invalid de la AI: conținut lipsă.');
+    }
     $raw = $data['choices'][0]['message']['content'];
     return formatResponse($raw);
 }
 
 function formatResponse($text) {
     return preg_replace([
-        '/##\s+/', '/\*\*(.*?)\*\*/', '/<tratament>/i', '/<prevenire>/i'
+        '/##\s+/',
+        '/\*\*(.*?)\*\*/',
+        '/<tratament>/i',
+        '/<prevenire>/i'
     ], [
-        '🔸 ', '$1', '💊 Tratament:', '🛡 Prevenire:'
+        '🔸 ',
+        '$1',
+        '💊 Tratament:',
+        '🛡 Prevenire:'
     ], $text);
 }
 
-function saveTrainingExample($base64, $label, $note) {
-    if (empty($base64)) return;
-    $dir = __DIR__ . '/data/uploads';
+function saveChatMessage($pdo, $deviceHash, $messageText, $isUserMessage) {
+    $sql = "INSERT INTO chat_history (device_hash, message_text, is_user_message, created_at) VALUES (:device_hash, :message_text, :is_user_message, NOW())";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':device_hash' => $deviceHash,
+        ':message_text' => $messageText,
+        ':is_user_message' => $isUserMessage ? 1 : 0
+    ]);
+}
+
+function loadRecentMessages($pdo, $deviceHash, $limit = 10) {
+    $sql = "SELECT message_text, is_user_message FROM chat_history WHERE device_hash = :device_hash ORDER BY created_at DESC LIMIT :limit";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':device_hash', $deviceHash, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $messages = [];
+    foreach (array_reverse($rows) as $row) { // oldest first
+        $messages[] = [
+            'role' => $row['is_user_message'] ? 'user' : 'assistant',
+            'content' => $row['message_text']
+        ];
+    }
+    return $messages;
+}
+
+function sanitizeInput($text) {
+    $clean = trim(strip_tags($text));
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()\-]/u', '', $clean);
+    return mb_substr($clean, 0, 300);
+}
+
+function validateDeviceHash($hash) {
+    if (!preg_match('/^[a-zA-Z0-9_-]{8,64}$/', $hash)) {
+        throw new Exception('ID dispozitiv invalid');
+    }
+}
+
+function trackUsage($pdo, $deviceHash, $type) {
+    $allowedTypes = ['image' => 'image_count', 'text' => 'text_count'];
+    if (!isset($allowedTypes[$type])) {
+        throw new InvalidArgumentException('Invalid tracking type');
+    }
+    $field = $allowedTypes[$type];
+
+    $today = date('Y-m-d');
+    $now = date('Y-m-d H:i:s');
+
+    $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
+    $stmt->execute([$deviceHash, $today]);
+    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($usage) {
+        $stmt = $pdo->prepare("UPDATE usage_tracking SET $field = $field + 1, last_request = ? WHERE id = ?");
+        $stmt->execute([$now, $usage['id']]);
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $field, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
+        $stmt->execute([$deviceHash, $today, $now, $now]);
+    }
+}
+
+function jsonResponse($success, $payload) {
+    return json_encode([
+        'success' => $success,
+        'error' => $success ? null : $payload,
+        'response' => $success ? $payload : null
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function logEvent($label, $data) {
+    $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
-    $imageData = base64_decode($base64);
-    if (!$imageData) return;
-    $filename = 'plant_' . time() . '_' . rand(1000, 9999) . '.jpg';
-    file_put_contents($dir . '/' . $filename, $imageData);
-    $line = '"' . addslashes($label) . '","' . addslashes($note) . '","' . addslashes($filename) . '"' . PHP_EOL;
-    file_put_contents(__DIR__ . '/data/dataset.csv', $line, FILE_APPEND);
+    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+function getInputData() {
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (stripos($contentType, 'application/json') !== false) {
+        $json = file_get_contents('php://input');
+        $data = json_decode($json, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // logEvent('JSONDecodeError', ['error' => json_last_error_msg(), 'raw' => $json]);
+            return [];
+        }
+
+        return is_array($data) ? $data : [];
+    }
+    return $_POST;
 }
