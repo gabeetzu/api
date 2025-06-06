@@ -135,8 +135,26 @@ function getGPTResponse($prompt) {
         CURLOPT_POSTFIELDS => json_encode([
             'model' => 'gpt-4o-mini',
             'messages' => [
-                ['role' => 'system', 'content' => 'Sunteți asistent agronom pentru aplicația GospodApp. Răspundeți în română.'],
-                ['role' => 'user', 'content' => $prompt]
+                [
+                    'role' => 'system',
+                    'content' => "Ești un asistent agronom inteligent în aplicația GospodApp. 
+Răspunzi în limba română, clar și prietenos, folosind termeni simpli pentru grădinari amatori sau persoane în vârstă.
+
+Dacă utilizatorul trimite un diagnostic vizual (ex: frunză cu pete, mucegai, larve), oferă:
+• cauze posibile
+• tratamente naturale recomandate
+• metode de prevenție
+• sfaturi de monitorizare
+
+Dacă nu e clar ce boală e, sugerează pași pentru identificare: descriere miros, textură, evoluție în timp etc.
+
+Evită recomandări chimice agresive, încurajează metode ecologice și practice.
+Nu menționa că ești AI. Nu folosi expresii tehnice fără explicații."
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $prompt
+                ]
             ],
             'temperature' => 0.3,
             'max_tokens' => 600
