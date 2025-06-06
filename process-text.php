@@ -153,7 +153,11 @@ function getGPTResponse($prompt) {
         throw new Exception('Răspuns invalid de la AI');
     }
 
-    return formatResponse($data['choices'][0]['message']['content']);
+    $rawContent = $data['choices'][0]['message']['content'];
+    return [
+        'text' => formatResponse($rawContent),
+        'raw' => $rawContent
+    ];
 }
 
 // ====================
