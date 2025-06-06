@@ -45,7 +45,6 @@ try {
     } elseif (!empty($cnnDiagnosis)) {
         $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
     } elseif (!empty($userMessage)) {
-        // Handle pure text question (if you want to allow this)
         $treatment = getGPTResponse($userMessage);
     } else {
         throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
@@ -123,8 +122,6 @@ function handleCnnDiagnosis($diagnosis, $userMessage) {
     return getGPTResponse($prompt);
 }
 
-// ... Keep all your existing vision/GPT functions unchanged ...
-
 // --- GPT Response Handler ---
 function getGPTResponse($prompt) {
     $ch = curl_init('https://api.openai.com/v1/chat/completions');
@@ -162,7 +159,6 @@ function getGPTResponse($prompt) {
 // ====================
 // RESPONSE FORMATTING
 // ====================
-
 function formatForDisplay($text) {
     $text = preg_replace('/\*\*Observații:\*\*/', "🔍 Observații\n", $text);
     $text = preg_replace('/\*\*Cauze posibile:\*\*/', "🦠 Cauze posibile\n", $text);
@@ -171,22 +167,19 @@ function formatForDisplay($text) {
     return str_replace('•', "• ", $text);
 }
 
-
 function cleanForTTS($text) {
     $text = strip_tags($text);
-    $text = preg_replace('/\*\*.*?\*\*/', '', $text); // Remove any bold
-    $text = preg_replace('/[\n\r]+/', '. ', $text); // New lines to periods
-    $text = preg_replace('/•\s*/', '', $text); // Remove bullet points
-    $text = preg_replace('/\d+\.\s*/', '', $text); // Remove numbering
-    $text = preg_replace('/\s+/', ' ', $text); // Normalize spaces
+    $text = preg_replace('/\*\*.*?\*\*/', '', $text);
+    $text = preg_replace('/[\n\r]+/', '. ', $text);
+    $text = preg_replace('/•\s*/', '', $text);
+    $text = preg_replace('/\d+\.\s*/', '', $text);
+    $text = preg_replace('/\s+/', ' ', $text);
     return trim($text);
 }
-
 
 // ====================
 // VALIDATION & HELPERS
 // ====================
-
 function validateImage($base64) {
     if (strlen($base64) > 5 * 1024 * 1024 || !preg_match('/^[a-zA-Z0-9\/+]+={0,2}$/', $base64)) {
         throw new Exception('Imagine invalidă');
