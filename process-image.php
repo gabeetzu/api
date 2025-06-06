@@ -35,13 +35,13 @@ try {
     }
 
     echo json_encode([
-    'success' => true,
-    'response_id' => bin2hex(random_bytes(6)),
-    'response' => is_string($treatment) ? ['text' => $treatment] : $treatment
-], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        'success' => true,
+        'response_id' => bin2hex(random_bytes(6)),
+        'response' => is_string($treatment) ? ['text' => $treatment] : $treatment
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 } catch (Exception $e) {
-    error_log('[GospodApp AI Error] ' . $e->getMessage()); // Logs to PHP error log
+    error_log('[GospodApp AI Error] ' . $e->getMessage());
     http_response_code(400);
     echo json_encode([
         'success' => false,
@@ -85,7 +85,12 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
         $cnnDiagnosis
     );
     
-    return getGPTResponse($prompt);
+    $response = getGPTResponse($prompt);
+
+    // ✅ Save training data
+    saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
+
+    return $response;
 }
 
 function handleCnnDiagnosis($diagnosis, $userMessage) {
@@ -134,14 +139,12 @@ function extractVisualFeatures($visionData) {
     $features = [];
     $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
     
-    // Process label annotations
     foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
         if ($label['score'] > 0.75 && hasDiseaseKeyword($label['description'], $diseaseKeywords)) {
             $features[] = ucfirst($label['description']);
         }
     }
-    
-    // Add dominant colors
+
     $colors = [];
     foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
         if ($color['pixelFraction'] > 0.05) {
@@ -206,7 +209,7 @@ function formatFeatures(array $features) {
 function getGPTResponse($prompt) {
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 10, // seconds
+        CURLOPT_TIMEOUT => 10,
         CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
@@ -261,4 +264,20 @@ function formatResponse($text) {
         '💊 Tratament:',
         '🛡 Prevenire:'
     ], $text);
+}
+
+// ✅ Save image + metadata
+function saveTrainingExample($base64, $label, $note) {
+    $dir = __DIR__ . '/data/uploads';
+    if (!file_exists($dir)) {
+        mkdir($dir, 0775, true);
+    }
+
+    $imageData = base64_decode($base64);
+    $filename = 'plant_' . time() . '_' . rand(1000, 9999) . '.jpg';
+    $filePath = $dir . '/' . $filename;
+    file_put_contents($filePath, $imageData);
+
+    $csvLine = '"' . addslashes($label) . '","' . addslashes($note) . '","' . addslashes($filename) . '"' . PHP_EOL;
+    file_put_contents(__DIR__ . '/data/dataset.csv', $csvLine, FILE_APPEND);
 }
