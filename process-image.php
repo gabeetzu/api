@@ -78,6 +78,11 @@ function validateImage(&$imageBase64) {
 function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     $visionData = analyzeImageWithVisionAPI($imageBase64);
     $features = extractVisualFeatures($visionData);
+
+// 🔁 If Vision fails, try YOLO fallback
+if (empty($features) || (count($features) === 1 && str_contains($features[0], 'Nu s-au detectat'))) {
+    $features = runYoloFallback($imageBase64);
+}
     
     $prompt = buildHybridPrompt(
         formatFeatures($features),
@@ -87,6 +92,20 @@ function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
     
     $response = getGPTResponse($prompt);
 
+function runYoloFallback($base64) {
+    $tmp = __DIR__ . '/temp_yolo.jpg';
+    file_put_contents($tmp, base64_decode($base64));
+
+    $cmd = escapeshellcmd("python3 yolo_infer.py " . escapeshellarg($tmp));
+    $output = shell_exec($cmd);
+    if (!$output) return ["Analiza alternativă a eșuat"];
+
+    $data = json_decode($output, true);
+    if (!isset($data['label'])) return ["YOLO nu a detectat nimic clar"];
+
+    return [ucfirst($data['label']) . " (YOLO: " . round($data['confidence'] * 100) . "% încredere)"];
+}
+    
     // ✅ Save training data
     saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
 
