@@ -82,7 +82,11 @@ try {
 } catch (Exception $e) {
     logEvent('TextError', $e->getMessage());
     http_response_code(400);
-    echo jsonResponse(false, $e->getMessage());
+    echo json_encode([
+    'success' => false,
+    'response_id' => bin2hex(random_bytes(6)),
+    'error' => $e->getMessage()
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 // --- Helper Functions ---
@@ -112,10 +116,10 @@ PROMPT;
 }
 
 function getGPTResponse($prompt) {
-    $ch = curl_init('https://api.openai.com/v1/chat/completions');
+    $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 12,
+        CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: application/json',
@@ -123,34 +127,42 @@ function getGPTResponse($prompt) {
         ],
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
-            'model' => 'gpt-4o-mini',
+            'model' => 'gpt-4o',
             'messages' => [
-                [
-                    'role' => 'system', 
-                    'content' => 'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde simplu, clar și pozitiv în română. Nu aborda subiecte în afara agriculturii și grădinăritului.'
-                ],
+                ['role' => 'system', 'content' =>
+                    'Ești un asistent agronom empatic pentru aplicația GospodApp. Răspunde mereu în română, simplu, clar și pozitiv. Nu răspunde la întrebări în afara agriculturii.'],
                 ['role' => 'user', 'content' => $prompt]
             ],
             'temperature' => 0.7,
-            'max_tokens' => 600,
+            'max_tokens' => 1200,
             'top_p' => 0.9
         ])
     ]);
-
-    $response = curl_exec($ch);
+    $res = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    
-    if (!$response || $httpCode !== 200) {
-        throw new Exception('Eroare serviciu OpenAI (HTTP: ' . $httpCode . ')');
+
+    if (!$res) {
+        throw new Exception('Eroare la serviciul OpenAI: Nu s-a primit răspuns.');
     }
-    
-    $data = json_decode($response, true);
+
+    if ($httpCode !== 200) {
+        $errorData = json_decode($res, true);
+        $errorMsg = $errorData['error']['message'] ?? 'Eroare necunoscută de la API.';
+        throw new Exception("OpenAI API Error ($httpCode): $errorMsg");
+    }
+
+    $data = json_decode($res, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('Răspuns JSON invalid de la OpenAI: ' . json_last_error_msg());
+    }
+
     if (empty($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI');
+        throw new Exception('Răspuns invalid de la AI: conținut lipsă.');
     }
-    
-    return $data['choices'][0]['message']['content'];
+
+    $raw = $data['choices'][0]['message']['content'];
+    return formatResponse($raw);
 }
 
 function formatResponse($text) {
@@ -187,14 +199,22 @@ function getInputData() {
     if (stripos($contentType, 'application/json') !== false) {
         $json = file_get_contents('php://input');
         $data = json_decode($json, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Log the malformed JSON for debugging if you want:
+            // logEvent('JSONDecodeError', ['error' => json_last_error_msg(), 'raw' => $json]);
+            return [];  // Or throw new Exception('Invalid JSON input');
+        }
+
         return is_array($data) ? $data : [];
     }
     return $_POST;
 }
 
+
 function sanitizeInput($text) {
     $clean = trim(strip_tags($text));
-    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()-]/u', '', $clean);
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()\-]/u', '', $clean); // Added hyphen to allowed chars
     return mb_substr($clean, 0, 300);
 }
 
@@ -205,6 +225,12 @@ function validateDeviceHash($hash) {
 }
 
 function trackUsage($pdo, $deviceHash, $type) {
+    $allowedTypes = ['image' => 'image_count', 'text' => 'text_count'];
+    if (!isset($allowedTypes[$type])) {
+        throw new InvalidArgumentException('Invalid tracking type');
+    }
+    $field = $allowedTypes[$type];
+
     $today = date('Y-m-d');
     $now = date('Y-m-d H:i:s');
     
@@ -213,13 +239,10 @@ function trackUsage($pdo, $deviceHash, $type) {
     $usage = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($usage) {
-        $field = ($type === 'image') ? 'image_count' : 'text_count';
         $stmt = $pdo->prepare("UPDATE usage_tracking SET $field = $field + 1, last_request = ? WHERE id = ?");
         $stmt->execute([$now, $usage['id']]);
     } else {
-        $field = ($type === 'image') ? 'image_count' : 'text_count';
         $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $field, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
         $stmt->execute([$deviceHash, $today, $now, $now]);
     }
 }
-?>
