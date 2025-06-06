@@ -27,6 +27,6 @@ $entry = [
 ];
 
 $csvLine = '"' . implode('","', array_map('addslashes', $entry)) . '"' . PHP_EOL;
-file_put_contents(__DIR__ . '/data/corrections.csv', $csvLine, FILE_APPEND);
+file_put_contents('/data/corrections.csv', $csvLine, FILE_APPEND);
 
 echo json_encode(['success' => true, 'message' => 'Feedback salvat. Mulțumim!']);
