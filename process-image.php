@@ -5,73 +5,58 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
-// --- Logging ---
-function logEvent($label, $data) {
-    $logDir = __DIR__ . '/logs';
-    if (!file_exists($logDir)) mkdir($logDir, 0775, true);
-    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
-    file_put_contents($logDir . '/activity.log', $line, FILE_APPEND);
-}
-
-// --- Handle preflight CORS ---
+// --- CORS Preflight ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
 
-// --- API Key Security ---
+// --- API Key Check ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
 if (!hash_equals($expectedKey, $apiKey)) {
-    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
     die(json_encode(['success' => false, 'error' => 'Acces neautorizat'], JSON_UNESCAPED_UNICODE));
 }
 
+// --- Main Execution ---
 try {
     $input = getInputData();
-    logEvent('Input', $input);
-
     $imageBase64 = $input['image'] ?? '';
     $userMessage = sanitizeInput($input['message'] ?? '');
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
 
     if (!empty($imageBase64)) {
         validateImage($imageBase64);
-        $treatment = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
+        $response = handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis);
     } elseif (!empty($cnnDiagnosis)) {
-        $treatment = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
+        $response = handleCnnDiagnosis($cnnDiagnosis, $userMessage);
     } elseif (!empty($userMessage)) {
-        $treatment = getGPTResponse($userMessage);
+        $response = getGPTResponse($userMessage);
     } else {
-        throw new Exception('Date lipsă: Trimiteți o imagine, un diagnostic sau un mesaj');
+        throw new Exception('Date lipsă: trimiteți o imagine, un diagnostic sau un mesaj.');
     }
 
-    if ($treatment === null) {
-        throw new Exception('Răspuns gol de la AI');
-    }
-
-    echo safeJsonEncode([
+    echo json_encode([
         'success' => true,
         'response_id' => bin2hex(random_bytes(6)),
-        'response' => is_string($treatment) ? ['text' => $treatment, 'raw' => $treatment] : $treatment
-    ]);
-    logEvent('Success', $treatment);
+        'response' => is_string($response) ? ['text' => $response, 'raw' => $response] : $response
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
 } catch (Exception $e) {
-    logEvent('Error', $e->getMessage());
     http_response_code(400);
-    echo safeJsonEncode([
+    echo json_encode([
         'success' => false,
         'error' => $e->getMessage()
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
 }
 
+// --- Helpers & Core Logic ---
 function getInputData() {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'application/json') !== false) {
-        $data = json_decode(file_get_contents('php://input'), true);
-        return is_array($data) ? $data : [];
+        $json = json_decode(file_get_contents('php://input'), true);
+        return is_array($json) ? $json : [];
     }
     return $_POST;
 }
@@ -82,55 +67,32 @@ function sanitizeInput($text) {
     return mb_substr($clean, 0, 300);
 }
 
-function validateImage(&$imageBase64) {
-    // Remove data URL prefix if present
-    if (strpos($imageBase64, 'base64,') !== false) {
-        $parts = explode(',', $imageBase64, 2);
-        $imageBase64 = $parts[1];
+function validateImage(&$base64) {
+    if (strpos($base64, 'base64,') !== false) {
+        $parts = explode(',', $base64, 2);
+        $base64 = $parts[1];
     }
-
-    // Remove whitespace and newlines
-    $imageBase64 = preg_replace('/[\s\r\n]/', '', $imageBase64);
-
-    // Validate length and characters
-    $validLength = strlen($imageBase64) % 4 === 0;
-    $validChars = preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $imageBase64);
-
-    if (!$validLength || !$validChars) {
-        throw new Exception('Format imagine invalid');
-    }
-
-    // Validate padding
-    $padCount = substr_count($imageBase64, '=');
-    if ($padCount > 2 || ($padCount > 0 && !preg_match('/=$/', $imageBase64))) {
-        throw new Exception('Format imagine invalid');
-    }
-
-    // Check maximum size
-    if (strlen($imageBase64) > 5 * 1024 * 1024) {
-        throw new Exception('Imagine prea mare (max 5MB)');
-    }
+    $base64 = preg_replace('/[\s\r\n]/', '', $base64);
+    if (strlen($base64) > 5 * 1024 * 1024) throw new Exception('Imagine prea mare (max 5MB)');
+    if (!preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $base64)) throw new Exception('Format imagine invalid');
 }
-
-function handleImageAnalysis($imageBase64, $userMessage, $cnnDiagnosis) {
-    $visionData = analyzeImageWithVisionAPI($imageBase64);
+function handleImageAnalysis($base64, $userMessage, $cnnDiagnosis) {
+    $visionData = analyzeImageWithVisionAPI($base64);
     $features = extractVisualFeatures($visionData);
 
     if (empty($features) || (count($features) === 1 && str_contains($features[0], 'Nu s-au detectat'))) {
-        $features = runYoloFallback($imageBase64);
+        $features = runYoloFallback($base64);
     }
 
     $prompt = buildHybridPrompt(
-        formatFeatures($features),
         formatFeatures($features),
         $userMessage,
         $cnnDiagnosis
     );
 
-    $response = getGPTResponse($prompt);
-    saveTrainingExample($imageBase64, $cnnDiagnosis, $userMessage);
-
-    return $response;
+    $result = getGPTResponse($prompt);
+    saveTrainingExample($base64, $cnnDiagnosis, $userMessage);
+    return $result;
 }
 
 function runYoloFallback($base64) {
@@ -148,61 +110,49 @@ function handleCnnDiagnosis($diagnosis, $userMessage) {
     return getGPTResponse($prompt);
 }
 
-function analyzeImageWithVisionAPI($imageBase64) {
+function analyzeImageWithVisionAPI($base64) {
     $url = 'https://vision.googleapis.com/v1/images:annotate?key=' . getenv('GOOGLE_VISION_KEY');
-    $requestData = [
+    $body = [
         'requests' => [[
-            'image' => ['content' => $imageBase64],
+            'image' => ['content' => $base64],
             'features' => [
-                ['type' => 'LABEL_DETECTION', 'maxResults' => 15],
-                ['type' => 'OBJECT_LOCALIZATION', 'maxResults' => 10],
+                ['type' => 'LABEL_DETECTION', 'maxResults' => 10],
                 ['type' => 'IMAGE_PROPERTIES']
             ]
         ]]
     ];
-
-    $options = [
-        'http' => [
-            'header'  => "Content-Type: application/json\r\n",
-            'method'  => 'POST',
-            'content' => json_encode($requestData)
-        ]
-    ];
-
-    $context = stream_context_create($options);
-    $response = file_get_contents($url, false, $context);
-    if ($response === false) {
-        throw new Exception('Eroare la analiza imaginii');
-    }
-    return json_decode($response, true);
+    $opts = ['http' => [
+        'header'  => "Content-Type: application/json\r\n",
+        'method'  => 'POST',
+        'content' => json_encode($body)
+    ]];
+    $context = stream_context_create($opts);
+    $res = file_get_contents($url, false, $context);
+    if (!$res) throw new Exception('Eroare la analiza imaginii');
+    return json_decode($res, true);
 }
 
-function extractVisualFeatures($visionData) {
+function extractVisualFeatures($data) {
     $features = [];
-    $diseaseKeywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
-    foreach ($visionData['responses'][0]['labelAnnotations'] ?? [] as $label) {
-        if ($label['score'] > 0.75 && hasDiseaseKeyword($label['description'], $diseaseKeywords)) {
+    $keywords = ['leaf spot', 'blight', 'mildew', 'rust', 'rot', 'lesion', 'chlorosis'];
+    foreach ($data['responses'][0]['labelAnnotations'] ?? [] as $label) {
+        if ($label['score'] > 0.75 && preg_match('/' . implode('|', $keywords) . '/i', $label['description'])) {
             $features[] = ucfirst($label['description']);
         }
     }
     $colors = [];
-    foreach ($visionData['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
+    foreach ($data['responses'][0]['imagePropertiesAnnotation']['dominantColors']['colors'] ?? [] as $color) {
         if ($color['pixelFraction'] > 0.05) {
-            $rgb = $color['color'];
-            $colors[] = sprintf("#%02x%02x%02x", $rgb['red'], $rgb['green'], $rgb['blue']);
+            $c = $color['color'];
+            $colors[] = sprintf("#%02x%02x%02x", $c['red'], $c['green'], $c['blue']);
         }
     }
     if (!empty($colors)) {
         $features[] = "Culori predominante: " . implode(', ', $colors);
     }
-    return empty($features) ? ["Nu s-au detectat caracteristici clare"] : $features;
+    return $features ?: ["Nu s-au detectat caracteristici clare"];
 }
 
-function hasDiseaseKeyword($text, $keywords) {
-    return preg_match('/\\b(' . implode('|', $keywords) . ')\\b/i', $text);
-}
-
-// --- Prompt Engineering ---
 function buildHybridPrompt($features, $userMessage, $cnnDiagnosis) {
     return <<<PROMPT
 Ești un asistent agronom prietenos pentru aplicația GospodApp. Răspunde în limba română clar și empatic.
@@ -243,7 +193,6 @@ function formatFeatures(array $features) {
     return '• ' . implode("\n• ", array_slice($features, 0, 5));
 }
 
-// --- GPT Integration ---
 function getGPTResponse($prompt) {
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -267,60 +216,30 @@ function getGPTResponse($prompt) {
             'top_p' => 0.9
         ])
     ]);
-
-    $response = curl_exec($ch);
-    if (!$response || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) {
-        throw new Exception('Eroare la serviciul OpenAI');
-    }
-
-    $data = json_decode($response, true);
-    if (empty($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI');
-    }
-
+    $res = curl_exec($ch);
+    if (!$res || curl_getinfo($ch, CURLINFO_HTTP_CODE) !== 200) throw new Exception('Eroare la serviciul OpenAI');
+    $data = json_decode($res, true);
+    if (empty($data['choices'][0]['message']['content'])) throw new Exception('Răspuns invalid de la AI');
     $raw = $data['choices'][0]['message']['content'];
-    return [
-        'text' => formatResponse($raw),
-        'raw' => $raw
-    ];
+    return ['text' => formatResponse($raw), 'raw' => $raw];
 }
 
 function formatResponse($text) {
     return preg_replace([
-        '/##\s+/',
-        '/\*\*(.*?)\*\*/',
-        '/<tratament>/i',
-        '/<prevenire>/i'
+        '/##\s+/', '/\*\*(.*?)\*\*/', '/<tratament>/i', '/<prevenire>/i'
     ], [
-        '🔸 ',
-        '$1',
-        '💊 Tratament:',
-        '🛡 Prevenire:'
+        '🔸 ', '$1', '💊 Tratament:', '🛡 Prevenire:'
     ], $text);
 }
 
-// --- Auto-Training Sample Save ---
 function saveTrainingExample($base64, $label, $note) {
     if (empty($base64)) return;
-
     $dir = __DIR__ . '/data/uploads';
-    if (!file_exists($dir)) {
-        mkdir($dir, 0775, true);
-    }
-
+    if (!file_exists($dir)) mkdir($dir, 0775, true);
     $imageData = base64_decode($base64);
     if (!$imageData) return;
-
     $filename = 'plant_' . time() . '_' . rand(1000, 9999) . '.jpg';
-    $filePath = $dir . '/' . $filename;
-    file_put_contents($filePath, $imageData);
-
-    $csvLine = '"' . addslashes($label) . '","' . addslashes($note) . '","' . addslashes($filename) . '"' . PHP_EOL;
-    file_put_contents(__DIR__ . '/data/dataset.csv', $csvLine, FILE_APPEND);
-
-    logEvent('TrainingSaved', ['file' => $filename, 'label' => $label, 'note' => $note]);
-}
-
-function safeJsonEncode($data) {
-    return json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    file_put_contents($dir . '/' . $filename, $imageData);
+    $line = '"' . addslashes($label) . '","' . addslashes($note) . '","' . addslashes($filename) . '"' . PHP_EOL;
+    file_put_contents(__DIR__ . '/data/dataset.csv', $line, FILE_APPEND);
 }
