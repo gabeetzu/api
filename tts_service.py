@@ -6,6 +6,10 @@ import uuid
 
 app = Flask(__name__)
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    return "OK", 200
+
 # Load the Romanian model once at startup
 tts = TTS("tts_models/ro/cv/vits")
 
