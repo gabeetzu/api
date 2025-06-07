@@ -1,0 +1,10 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/action_clear_chat" android:title="Șterge conversația"/>
+    <item android:id="@+id/action_premium" android:title="Upgrade Premium"/>
+    <item android:title="Setări"/>
+    <item android:id="@+id/action_privacy_policy" android:title="Politica de Confidențialitate"/>
+    <item android:id="@+id/action_terms" android:title="Termeni și Condiții"/>
+    <!-- Add these 2 new items -->
+    <item android:id="@+id/action_revoke_consent" android:title="Revocă consimțământ"/>
+    <item android:id="@+id/action_delete_data" android:title="Șterge toate datele"/>
+</menu>
