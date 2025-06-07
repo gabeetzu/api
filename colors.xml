@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary Colors - Green Theme for Gardening -->
+    <color name="primary_green">#4CAF50</color>
+
+    <!-- Accent Colors -->
+
+    <!-- Background Colors -->
+
+    <!-- Text Colors - High Contrast for Elderly Users -->
+    <color name="text_dark">#212121</color>
+
+    <!-- White -->
+    <color name="white">#FFFFFF</color>
+    
+    <!-- Chat Bubble Colors -->
+
+    <!-- Button Colors -->
+
+    <!-- Alert Colors -->
+
+    <!-- Border Colors -->
+
+    <!-- Transparent -->
+    <color name="primary">#4CAF50</color>         <!-- Green -->
+        <color name="primaryDark">#388E3C</color>     <!-- Darker Green -->
+        <color name="onPrimary">#FFFFFF</color>       <!-- White for text/icons on green -->
+        <color name="secondary">#8BC34A</color>       <!-- Light Green -->
+        <color name="onSecondary">#000000</color>     <!-- Black for text/icons on light green -->
+        <color name="background">#FFF3E0</color>      <!-- Cream background -->
+    <!-- Shadow -->
+</resources>
