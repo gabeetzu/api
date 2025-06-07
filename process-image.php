@@ -47,6 +47,8 @@ try {
     $userMessage = sanitizeInput($input['message'] ?? '');
     $imageBase64 = $input['image'] ?? '';
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
+    $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
+    $cnnConfidence = max(0, min(1, $cnnConfidence));
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
 
     if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
@@ -89,14 +91,17 @@ PROMPT
     ];
 
     // Prepare user content for GPT input
-    if (!empty($cnnDiagnosis)) {
-        // If diagnosis provided, prepend to user message
+    if (!empty($cnnDiagnosis) && $cnnConfidence >= 0.75) {
+        // High confidence diagnosis
         $userContent = "Diagnostic AI: $cnnDiagnosis\nÎntrebarea utilizatorului: $userMessage";
-    } else if (!empty($imageBase64)) {
-        // If image, analyze features + include in prompt
+    } elseif (!empty($imageBase64)) {
+        // Low confidence or no diagnosis but image is present
         $features = analyzeImageFeatures($imageBase64);
         $featuresText = formatFeaturesText($features);
         $userContent = "$userMessage\n\nSimptome vizuale detectate: $featuresText";
+        if ($cnnConfidence < 0.75) {
+            $userContent .= "\n\nNotă: Modelul AI a fost nesigur. Întreabă utilizatorul mai multe detalii despre imagine.";
+        }
     } else {
         $userContent = $userMessage;
     }
