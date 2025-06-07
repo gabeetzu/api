@@ -49,6 +49,7 @@ try {
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
     $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
     $cnnConfidence = max(0, min(1, $cnnConfidence));
+    $weather = sanitizeInput($input['weather'] ?? '');
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
 
     if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
@@ -74,13 +75,11 @@ try {
     $systemMessage = [
         'role' => 'system',
         'content' => <<<PROMPT
-Ești vecinul prietenos care se pricepe la grădinărit și ajuți utilizatorii aplicației GospodApp.
-Vorbește cald și politicos, pe un ton optimist și uman, ca într-o conversație între vecini.
-
-Oferă sfaturi practice și valoroase pentru plante, culturi, boli sau dăunători și menționează, când e util, cum poate influența vremea situația curentă. Dacă informațiile sunt insuficiente, cere cu grijă mai multe detalii.
-Dacă nu ai suficiente informații, cere politicos mai multe detalii despre simptomele plantei sau condițiile de creștere, pentru a putea face un diagnostic mai bun.
-Recomandă soluții ecologice și sigure, evitând jargonul tehnic. Dacă întrebarea nu ține de agricultură, explică politicos că poți ajuta doar pe această temă.
-Încheie cu un scurt rezumat în câteva puncte despre ce poate face utilizatorul mai departe. Limitează răspunsul la maximum 5 propoziții clare și utile.
+Ești un vecin amabil și priceput la grădinărit. Răspunde pe scurt, călduros și încurajator.
+Include sfaturi practice și menționează, dacă este specificat, condițiile meteo curente.
+Oferă soluții ecologice și aprobate local. Dacă informațiile sunt puține, cere cu delicatețe detalii suplimentare.
+La final prezintă un rezumat în 2‑3 puncte ce pot fi urmate ușor.
+Răspunde doar la subiecte de agricultură.
 PROMPT
     ];
 
@@ -108,6 +107,9 @@ PROMPT
         $userContent = $userMessage;
     }
 
+    if (!empty($weather)) {
+        $userContent .= "\n\nCondiții meteo: $weather";
+    }
     $currentUserMessage = ['role' => 'user', 'content' => $userContent];
 
     $messagesForGPT = array_merge([$systemMessage], $historyMessages, [$currentUserMessage]);
