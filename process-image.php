@@ -74,32 +74,34 @@ try {
     $systemMessage = [
         'role' => 'system',
         'content' => <<<PROMPT
-Ești un asistent agronom prietenos și empatic pentru aplicația GospodApp. Vorbești clar și simplu în limba română, ca și cum ai explica unui prieten care are grijă de grădina lui.
+Ești vecinul prietenos care se pricepe la grădinărit și ajuți utilizatorii aplicației GospodApp.
+Vorbește cald și politicos, pe un ton optimist și uman, ca într-o conversație între vecini.
 
-Rolul tău este să oferi sfaturi practice, concrete și ușor de urmat pentru probleme legate de plante, culturi, boli și dăunători. Folosește un ton cald, optimist și încurajator.
-
+Oferă sfaturi practice și valoroase pentru plante, culturi, boli sau dăunători și menționează, când e util, cum poate influența vremea situația curentă. Dacă informațiile sunt insuficiente, cere cu grijă mai multe detalii.
 Dacă nu ai suficiente informații, cere politicos mai multe detalii despre simptomele plantei sau condițiile de creștere, pentru a putea face un diagnostic mai bun.
-
-Oferă recomandări ecologice, sigure și, dacă e cazul, produse aprobate în UE. Evită jargonul tehnic sau explicațiile prea complicate.
-
-Dacă întrebarea nu este legată de agricultură sau grădinărit, explică politicos că poți ajuta doar cu subiecte agricole și sugerează să ceară ajutor în altă parte.
-
-La final, rezumă în câteva puncte scurte ce poate face utilizatorul mai departe.
-
-Răspunde în maxim 5 propoziții clare și utile.
+Recomandă soluții ecologice și sigure, evitând jargonul tehnic. Dacă întrebarea nu ține de agricultură, explică politicos că poți ajuta doar pe această temă.
+Încheie cu un scurt rezumat în câteva puncte despre ce poate face utilizatorul mai departe. Limitează răspunsul la maximum 5 propoziții clare și utile.
 PROMPT
     ];
 
     // Prepare user content for GPT input
+    $featuresText = '';
+    if (!empty($imageBase64)) {
+        $features = analyzeImageFeatures($imageBase64);
+        $featuresText = formatFeaturesText($features);
+    }
     if (!empty($cnnDiagnosis) && $cnnConfidence >= 0.75) {
         // High confidence diagnosis
         $userContent = "Diagnostic AI: $cnnDiagnosis\nÎntrebarea utilizatorului: $userMessage";
+        if ($featuresText) {
+            $userContent .= "\n\nImagine: $featuresText";
+        }
     } elseif (!empty($imageBase64)) {
         // Low confidence or no diagnosis but image is present
-        $features = analyzeImageFeatures($imageBase64);
-        $featuresText = formatFeaturesText($features);
         $userContent = "$userMessage\n\nSimptome vizuale detectate: $featuresText";
-        if ($cnnConfidence < 0.75) {
+        if (!empty($cnnDiagnosis) && $cnnConfidence < 0.75) {
+            $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis (nesigur). Cere utilizatorului mai multe detalii.";
+        } elseif ($cnnConfidence < 0.75) {
             $userContent .= "\n\nNotă: Modelul AI a fost nesigur. Întreabă utilizatorul mai multe detalii despre imagine.";
         }
     } else {
