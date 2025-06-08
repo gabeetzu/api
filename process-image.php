@@ -46,6 +46,12 @@ try {
 
     $userMessage = sanitizeInput($input['message'] ?? '');
     $imageBase64 = $input['image'] ?? '';
+        if ($imageBase64 && strlen($imageBase64) > 4 * 1024 * 1024) {
+        throw new Exception('Imaginea depășește 3MB.');
+    }
+    if ($imageBase64 && !preg_match('/^[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
+        throw new Exception('Format imagine invalid.');
+    }
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
     $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
     $cnnConfidence = max(0, min(1, $cnnConfidence));
@@ -61,6 +67,13 @@ try {
         logEvent('Device', $deviceHash);
     }
 
+     $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
+    if (!checkRateLimit($rateId)) {
+        http_response_code(429);
+        echo jsonResponse(false, 'Prea multe cereri, încearcă mai târziu.');
+        exit();
+    }
+    
     // Track usage for text or image
     if (!empty($imageBase64)) {
         trackUsage($pdo, $deviceHash, 'image');
@@ -98,7 +111,17 @@ PROMPT
         }
     } elseif (!empty($imageBase64)) {
         // Low confidence or no diagnosis but image is present
-        $userContent = "$userMessage\n\nSimptome vizuale detectate: $featuresText";
+                $warning = '';
+        if ($cnnConfidence < 0.6) {
+            $warning = "Imaginea nu a fost foarte clară. Dacă poți, trimite o altă poză sau descrie ce vezi (pete, culoare, formă).\n\n";
+        }
+        $userContent = $warning . <<<TEXT
+Utilizatorul a trimis o fotografie cu o frunză. Nu a oferit descrieri. Pe baza analizei automate, s-au detectat:
+
+$featuresText
+
+Răspunde politicos, scurt și empatic, ca pentru un utilizator începător. Nu spune niciodată că utilizatorul a menționat aceste simptome.
+TEXT;
         if (!empty($cnnDiagnosis) && $cnnConfidence < 0.75) {
             $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis (nesigur). Cere utilizatorului mai multe detalii.";
         } elseif ($cnnConfidence < 0.75) {
@@ -200,46 +223,40 @@ function formatFeaturesText(array $features) {
     return implode(", ", array_slice($features, 0, 5));
 }
 
-function getGPTResponse(array $messages) {
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 12,
-        CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
-        ],
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode([
-            'model' => 'gpt-4o-mini',
-            'messages' => $messages,
-            'temperature' => 0.7,
-            'max_tokens' => 1200,
-            'top_p' => 0.9
-        ])
-    ]);
-    $res = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if (!$res) {
-        throw new Exception('Eroare la serviciul OpenAI: Nu s-a primit răspuns.');
-    }
-    if ($httpCode !== 200) {
-        $errorData = json_decode($res, true);
-        $errorMsg = $errorData['error']['message'] ?? 'Eroare necunoscută de la API.';
-        throw new Exception("OpenAI API Error ($httpCode): $errorMsg");
-    }
-    $data = json_decode($res, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception('Răspuns JSON invalid de la OpenAI: ' . json_last_error_msg());
-    }
-    if (empty($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI: conținut lipsă.');
-    }
-    $raw = $data['choices'][0]['message']['content'];
-    return formatResponse($raw);
+function getGPTResponse(array $messages, $retries = 2) {
+    $attempt = 0;
+    do {
+        $attempt++;
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
+            ],
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode([
+                'model' => 'gpt-4o-mini',
+                'messages' => $messages,
+                'temperature' => 0.7,
+                'max_tokens' => 1200,
+                'top_p' => 0.9
+            ])
+        ]);
+        $res = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($res && $httpCode === 200) {
+            $data = json_decode($res, true);
+            if (json_last_error() === JSON_ERROR_NONE && !empty($data['choices'][0]['message']['content'])) {
+                return formatResponse($data['choices'][0]['message']['content']);
+            }
+        }
+        sleep(1);
+    } while ($attempt <= $retries);
+    throw new Exception('OpenAI API indisponibil.');
 }
 
 function formatResponse($text) {
@@ -332,6 +349,24 @@ function logEvent($label, $data) {
     if (!file_exists($dir)) mkdir($dir, 0775, true);
     $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
     file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+function checkRateLimit($id, $limit = 30, $window = 3600) {
+    $dir = sys_get_temp_dir() . '/gospod_rl';
+    if (!file_exists($dir)) mkdir($dir, 0775, true);
+    $file = $dir . '/' . sha1($id) . '.json';
+    $now = time();
+    $data = ['count' => 1, 'start' => $now];
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true) ?: $data;
+        if ($now - $data['start'] > $window) {
+            $data = ['count' => 1, 'start' => $now];
+        } else {
+            $data['count']++;
+        }
+    }
+    file_put_contents($file, json_encode($data));
+    return $data['count'] <= $limit;
 }
 
 function getInputData() {
