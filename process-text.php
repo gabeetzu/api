@@ -58,6 +58,13 @@ try {
         trackUsage($pdo, $deviceHash, 'text');
     }
 
+    $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
+    if (!checkRateLimit($rateId)) {
+        http_response_code(429);
+        echo jsonResponse(false, 'Prea multe cereri, încearcă mai târziu.');
+        exit();
+    }
+
     // Load last messages from DB as array of messages with role/content
 $historyMessages = loadRecentMessages($pdo, $deviceHash, 10);
 
@@ -149,49 +156,41 @@ Instrucțiuni:
 PROMPT;
 }
 
-function getGPTResponse(array $messages) {
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_TIMEOUT => 12,
-        CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
-        ],
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => json_encode([
-            'model' => 'gpt-4o-mini',
-            'messages' => $messages,
-            'temperature' => 0.7,
-            'max_tokens' => 1200,
-            'top_p' => 0.9
-        ])
-    ]);
-    $res = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if (!$res) {
-        throw new Exception('Eroare la serviciul OpenAI: Nu s-a primit răspuns.');
-    }
-    if ($httpCode !== 200) {
-        $errorData = json_decode($res, true);
-        $errorMsg = $errorData['error']['message'] ?? 'Eroare necunoscută de la API.';
-        throw new Exception("OpenAI API Error ($httpCode): $errorMsg");
-    }
-    $data = json_decode($res, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception('Răspuns JSON invalid de la OpenAI: ' . json_last_error_msg());
-    }
-    if (empty($data['choices'][0]['message']['content'])) {
-        throw new Exception('Răspuns invalid de la AI: conținut lipsă.');
-    }
-    $raw = $data['choices'][0]['message']['content'];
-    return formatResponse($raw);
+function getGPTResponse(array $messages, $retries = 2) {
+    $attempt = 0;
+    do {
+        $attempt++;
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
+            ],
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode([
+                'model' => 'gpt-4o-mini',
+                'messages' => $messages,
+                'temperature' => 0.7,
+                'max_tokens' => 1200,
+                'top_p' => 0.9
+            ])
+        ]);
+        $res = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($res && $httpCode === 200) {
+            $data = json_decode($res, true);
+            if (json_last_error() === JSON_ERROR_NONE && !empty($data['choices'][0]['message']['content'])) {
+                return formatResponse($data['choices'][0]['message']['content']);
+            }
+        }
+        sleep(1);
+    } while ($attempt <= $retries);
+    throw new Exception('OpenAI API indisponibil.');
 }
-
-
 
 function formatResponse($text) {
     return preg_replace([
@@ -301,4 +300,22 @@ function trackUsage($pdo, $deviceHash, $type) {
         $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $field, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
         $stmt->execute([$deviceHash, $today, $now, $now]);
     }
+}
+
+function checkRateLimit($id, $limit = 30, $window = 3600) {
+    $dir = sys_get_temp_dir() . '/gospod_rl';
+    if (!file_exists($dir)) mkdir($dir, 0775, true);
+    $file = $dir . '/' . sha1($id) . '.json';
+    $now = time();
+    $data = ['count' => 1, 'start' => $now];
+    if (file_exists($file)) {
+        $data = json_decode(file_get_contents($file), true) ?: $data;
+        if ($now - $data['start'] > $window) {
+            $data = ['count' => 1, 'start' => $now];
+        } else {
+            $data['count']++;
+        }
+    }
+    file_put_contents($file, json_encode($data));
+    return $data['count'] <= $limit;
 }
