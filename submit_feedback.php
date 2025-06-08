@@ -5,7 +5,7 @@ header('Access-Control-Allow-Methods: POST');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-$expectedKey = getenv('API_SECRET_KEY');
+$expectedKey = getenv('API_SECRET_KEY') ?: '';
 if (!hash_equals($expectedKey, $apiKey)) {
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Unauthorized']);
