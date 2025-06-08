@@ -56,8 +56,7 @@ import com.google.android.gms.ads.AdRequest;
 import com.google.android.gms.ads.AdView;
 import com.google.android.gms.ads.LoadAdError;
 import com.google.android.gms.ads.MobileAds;
-import com.google.android.gms.ads.rewarded.RewardedAd;
-import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback;
+import com.secretele.gospodarului.AdHelper;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -116,6 +115,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private ImageButton buttonSend, buttonCamera, buttonMicrophone, buttonMenu, buttonRemoveImage;
     private ImageView imagePreview, dailyTipArrow;
     private TextView textViewDailyTip;
+    private TextView quotaView;
     private LinearLayout dailyTipHeader;
     private CardView imagePreviewContainer;
     private AdView adView;
@@ -133,7 +133,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private DailyTipProvider dailyTipProvider;
     private PrivacyManager privacyManager;
     private Interpreter tflite;
-    private RewardedAd rewardedAd;
 
     // ─── State ─────────────────────────────────────────────────────────────────
     private Bitmap selectedImage;
@@ -189,6 +188,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         applyChatTextSize();
         updateGDPRUI();
         initializeAds();
+        refreshQuota();
         loadInitialData();
 
         if (!prefs.getBoolean(KEY_ONBOARDING_DONE, false)) {
@@ -250,6 +250,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         dailyTipHeader = findViewById(R.id.dailyTipHeader);
         dailyTipArrow = findViewById(R.id.dailyTipArrow);
         adView = findViewById(R.id.adView);
+        quotaView = findViewById(R.id.quotaView);
 
         // Accessible UI tweaks
         textViewDailyTip.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18);
@@ -297,26 +298,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         MobileAds.initialize(this, initializationStatus -> { });
         AdRequest adRequest = new AdRequest.Builder().build();
         if (adView != null) adView.loadAd(adRequest);
-        loadRewardedAd();
-    }
-
-    // ─── loadRewardedAd() ────────────────────────────────────────────────────────
-    private void loadRewardedAd() {
-        RewardedAd.load(
-                this,
-                getString(R.string.admob_rewarded_id),
-                new AdRequest.Builder().build(),
-                new RewardedAdLoadCallback() {
-                    @Override
-                    public void onAdLoaded(@NonNull RewardedAd ad) {
-                        rewardedAd = ad;
-                    }
-                    @Override
-                    public void onAdFailedToLoad(@NonNull LoadAdError adError) {
-                        rewardedAd = null;
-                    }
-                }
-        );
+        AdHelper.preload(this);
     }
 
     // ─── preprocessForCNN() ─────────────────────────────────────────────────────
@@ -427,6 +409,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                                         addBotMessageToChat(botResponse);
                                         if (offlineManager != null) offlineManager.cacheResponse(botResponse);
                                         usageTracker.recordTextAPICall();
+                                        if (image != null) usageTracker.recordImageAPICall();
+                                        refreshQuota();
                                     } else {
                                         String error = body.has("error") && body.get("error").isJsonPrimitive()
                                                 ? body.get("error").getAsString()
@@ -532,20 +516,19 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             Toast.makeText(this, "Mesajul conține cuvinte nepermise.", Toast.LENGTH_SHORT).show();
             return;
         }
+        boolean isPremium = usageTracker.isPremiumUser();
+        if (!isPremium && usageTracker.getTextCount() >= UsageTracker.FREE_TEXT_LIMIT && selectedImage == null) {
+            showUpgradeDialog("Ai atins limita zilnică de 3 întrebări.");
+            return;
+        }
+        int remainingPhotos = UsageTracker.FREE_PHOTO_LIMIT + usageTracker.getRewardedTokens() - usageTracker.getPhotoCount();
+        if (!isPremium && selectedImage != null && remainingPhotos <= 0) {
+            showRewardedAdOrUpgrade();
+            return;
+        }
 
         addUserMessageToChat(userInput, selectedImage);
         editTextMessage.setText("");
-
-        // Usage limits
-        if (selectedImage != null && !usageTracker.canMakeImageAPICall()) {
-            showUpgradeDialogForImages();
-            clearSelectedImage();
-            return;
-        }
-        if (selectedImage == null && !usageTracker.canMakeTextAPICall()) {
-            showUpgradeDialogForText();
-            return;
-        }
 
         // Unified API call
         String finalInput = userInput.isEmpty() && selectedImage != null
@@ -819,9 +802,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             if (id == R.id.action_clear_chat) {
                 confirmClearChatHistory();
                 return true;
-            } else if (id == R.id.action_premium) {
-                showPremiumUpgradeDialog();
-                return true;
             } else if (id == R.id.action_settings) {
                 showSettingsDialog(); // now contains increase/decrease text + others
                 return true;
@@ -902,7 +882,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
 
     private void decreaseTextSize() {
         chatTextSizeSp -= 2f;
-        if (chatTextSizeSp < 16f) chatTextSizeSp = 16f;
+        if (chatTextSizeSp < 14f) chatTextSizeSp = 14f;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putFloat(KEY_CHAT_TEXT_SIZE, chatTextSizeSp).apply();
         applyChatTextSize();
@@ -915,13 +895,21 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         buttonMicrophone.setEnabled(consent);
     }
 
+    private void deleteAllData() {
+        chatMessages.clear();
+        if (chatAdapter != null) chatAdapter.notifyDataSetChanged();
+        if (chatHistoryManager != null) chatHistoryManager.clearChatHistory();
+        usageTracker.resetDailyUsage();
+        refreshQuota();
+        Toast.makeText(this, "Datele au fost șterse.", Toast.LENGTH_SHORT).show();
+    }
+
     private void showSettingsDialog() {
         String[] options = {
                 "Mărește textul",
                 "Micșorează textul",
-                "Politica de Confidențialitate",
-                "Termeni și Condiții",
-                "Revocă consimțământul"
+                "Revocă consimțământ GDPR",
+                "Șterge toate datele"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Setări")
@@ -934,18 +922,25 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                             decreaseTextSize();
                             break;
                         case 2:
-                            openLegalDocument("https://gospodapp.ro/politica-confidentialitate");
+                            privacyManager.revokeConsent(MainActivity.this);
                             break;
                         case 3:
-                            openLegalDocument("https://gospodapp.ro/termeni-si-conditii");
-                            break;
-                        case 4:
-                            privacyManager.revokeConsent(MainActivity.this);
+                            deleteAllData();
                             break;
                     }
                 })
                 .setNegativeButton("Închide", null)
                 .show();
+    }
+
+    private void refreshQuota() {
+        boolean isPremium = usageTracker.isPremiumUser();
+        if (isPremium) {
+            quotaView.setVisibility(View.GONE);
+            return;
+        }
+        quotaView.setVisibility(View.VISIBLE);
+        quotaView.setText("Întrebări: " + (UsageTracker.FREE_TEXT_LIMIT - usageTracker.getTextCount()) + " | Poze: " + (UsageTracker.FREE_PHOTO_LIMIT + usageTracker.getRewardedTokens() - usageTracker.getPhotoCount()));
     }
 
 
@@ -1095,6 +1090,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             adView.resume();
         }
         if (usageTracker != null) usageTracker.refreshUsageData();
+        refreshQuota();
         if (offlineManager != null) {
             offlineManager.retry(apiService, new Callback<JsonObject>() {
                 @Override
@@ -1153,47 +1149,24 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     // ─── Prompt the user when they exceed image‐API limits ─────────────────────────
-    private void showUpgradeDialogForImages() {
+    private void showUpgradeDialog(String msg) {
         new AlertDialog.Builder(this)
-                .setTitle("Limită Imagini Atinsă")
-                .setMessage("Ai folosit analiza gratuită. Premium: 5 analize/zi, text nelimitat, fără reclame.")
-                .setPositiveButton("Upgrade Premium", (d, w) -> showPremiumUpgradeDialog())
-                .setNegativeButton("Urmărește Reclamă", (d, w) -> {
-                    if (rewardedAd != null) {
-                        rewardedAd.show(MainActivity.this, rewardItem -> {
-                            usageTracker.addExtraImageCredits(1);
-                            Toast.makeText(this, "Ai primit 1 analiză foto extra!", Toast.LENGTH_SHORT).show();
-                            loadRewardedAd();
-                        });
-                    } else {
-                        Toast.makeText(this, "Reclama nu este încărcată.", Toast.LENGTH_SHORT).show();
-                        loadRewardedAd();
-                    }
-                })
-                .setNeutralButton("Anulează", null)
+                .setTitle("Upgrade Premium")
+                .setMessage(msg)
+                .setPositiveButton("Abonare", (d, w) -> showPremiumUpgradeDialog())
+                .setNegativeButton("Mai târziu", null)
                 .show();
     }
 
     // ─── Prompt the user when they exceed text‐API limits ──────────────────────────
-    private void showUpgradeDialogForText() {
-        new AlertDialog.Builder(this)
-                .setTitle("Limită Întrebări Atinsă")
-                .setMessage("Ai folosit întrebările gratuite. Premium: text nelimitat, 5 analize/zi, fără reclame.")
-                .setPositiveButton("Upgrade Premium", (d, w) -> showPremiumUpgradeDialog())
-                .setNegativeButton("Urmărește Reclamă", (d, w) -> {
-                    if (rewardedAd != null) {
-                        rewardedAd.show(MainActivity.this, rewardItem -> {
-                            usageTracker.addExtraQuestions(3);
-                            Toast.makeText(this, "Ai primit 3 întrebări text extra!", Toast.LENGTH_SHORT).show();
-                            loadRewardedAd();
-                        });
-                    } else {
-                        Toast.makeText(this, "Reclama nu este încărcată.", Toast.LENGTH_SHORT).show();
-                        loadRewardedAd();
-                    }
-                })
-                .setNeutralButton("Anulează", null)
-                .show();
+    private void showRewardedAdOrUpgrade() {
+        boolean shown = AdHelper.show(this, () -> {
+            usageTracker.addRewardedToken();
+            refreshQuota();
+        });
+        if (!shown) {
+            showUpgradeDialog("Vizualizează un video de 15 sec pentru încă o analiză foto gratuită.");
+        }
     }
 
     // ─── Show Premium‐upgrade dialog ───────────────────────────────────────────────

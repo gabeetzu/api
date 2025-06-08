@@ -14,18 +14,24 @@ public class UsageTracker {
     private static final String PREF_NAME = "usage_tracker";
     private static final String KEY_DAILY_TEXT_USAGE = "daily_text_usage";
     private static final String KEY_DAILY_IMAGE_USAGE = "daily_image_usage";
+    private static final String KEY_REWARDED_TOKENS = "rewarded_photo_tokens";
     private static final String KEY_LAST_RESET_DATE = "last_reset_date";
     private static final String KEY_IS_PREMIUM = "is_premium";
     private static final String KEY_EXTRA_QUESTIONS = "extra_questions";
     private static final String KEY_AD_COUNTER = "ad_counter";
     private static final String KEY_EXTRA_IMAGE_CREDITS = "extra_image_credits"; // Key for extra image credits
 
+    public static final int FREE_TEXT_LIMIT = 3;
+    public static final int FREE_PHOTO_LIMIT = 1;
+    public static final int PREMIUM_PHOTO_LIMIT = 5;
     private final SharedPreferences preferences;
     private final Context context;
+    private int rewardedPhotoTokens;
 
     public UsageTracker(Context context) {
         this.context = context;
         this.preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        this.rewardedPhotoTokens = preferences.getInt(KEY_REWARDED_TOKENS, 0);
         checkAndResetDailyUsage(); // Initial check
     }
 
@@ -46,15 +52,21 @@ public class UsageTracker {
 
         if (!today.equals(lastResetDate)) {
             Log.d(TAG, "New day detected. Resetting daily usage and extra credits.");
-            preferences.edit()
-                    .putInt(KEY_DAILY_TEXT_USAGE, 0)
-                    .putInt(KEY_DAILY_IMAGE_USAGE, 0)
-                    .putInt(KEY_AD_COUNTER, 0)
-                    .putInt(KEY_EXTRA_QUESTIONS, 0) // Reset extra text questions too if they are daily
-                    .putInt(KEY_EXTRA_IMAGE_CREDITS, 0) // Reset extra image credits daily
-                    .putString(KEY_LAST_RESET_DATE, today)
-                    .apply();
+            resetCounts();
+            preferences.edit().putString(KEY_LAST_RESET_DATE, today).apply();
         }
+    }
+
+    private void resetCounts() {
+        preferences.edit()
+                .putInt(KEY_DAILY_TEXT_USAGE, 0)
+                .putInt(KEY_DAILY_IMAGE_USAGE, 0)
+                .putInt(KEY_AD_COUNTER, 0)
+                .putInt(KEY_EXTRA_QUESTIONS, 0)
+                .putInt(KEY_EXTRA_IMAGE_CREDITS, 0)
+                .putInt(KEY_REWARDED_TOKENS, 0)
+                .apply();
+        rewardedPhotoTokens = 0;
     }
 
     private String getCurrentDate() {
@@ -90,14 +102,18 @@ public class UsageTracker {
         return preferences.getInt(KEY_DAILY_TEXT_USAGE, 0);
     }
 
+    // Helper alias for readability
+    public int getTextCount() {
+        return getDailyTextUsage();
+    }
     public int getDailyTextLimit() {
-        return isPremiumUser() ? 100 : 10;
+        return isPremiumUser() ? Integer.MAX_VALUE : FREE_TEXT_LIMIT;
     }
 
     // --- Image Limit Management ---
     public boolean canMakeImageAPICall() {
         checkAndResetDailyUsage(); // Ensure limits are fresh
-        int extraCredits = preferences.getInt(KEY_EXTRA_IMAGE_CREDITS, 0);
+        int extraCredits = preferences.getInt(KEY_EXTRA_IMAGE_CREDITS, 0) + rewardedPhotoTokens;
         return getDailyImageUsage() < (getDailyImageLimit() + extraCredits);
     }
 
@@ -110,7 +126,11 @@ public class UsageTracker {
             incrementAdCounter();
         }
 
-        if (currentExtraImageCredits > 0) {
+        if (rewardedPhotoTokens > 0) {
+            rewardedPhotoTokens--;
+            preferences.edit().putInt(KEY_REWARDED_TOKENS, rewardedPhotoTokens).apply();
+            Log.d(TAG, "Used rewarded photo token. Remaining: " + rewardedPhotoTokens);
+        } else if (currentExtraImageCredits > 0) {
             preferences.edit().putInt(KEY_EXTRA_IMAGE_CREDITS, currentExtraImageCredits - 1).apply();
             Log.d(TAG, "Used an extra image credit. Remaining extra: " + (currentExtraImageCredits - 1));
         } else {
@@ -123,9 +143,12 @@ public class UsageTracker {
         // checkAndResetDailyUsage(); // No need to call again if canMakeImageAPICall already did
         return preferences.getInt(KEY_DAILY_IMAGE_USAGE, 0);
     }
+    public int getPhotoCount() {
+        return getDailyImageUsage();
+    }
 
     public int getDailyImageLimit() {
-        return isPremiumUser() ? 10 : 1;
+        return isPremiumUser() ? PREMIUM_PHOTO_LIMIT : FREE_PHOTO_LIMIT;
     }
 
     // --- Ad Management ---
@@ -172,6 +195,21 @@ public class UsageTracker {
         Log.d(TAG, count + " extra image credits added. Total extra: " + (currentExtra + count));
     }
 
+    // --- Rewarded photo tokens ---
+    public int getRewardedTokens() {
+        return rewardedPhotoTokens;
+    }
+
+    public void addRewardedToken() {
+        rewardedPhotoTokens++;
+        preferences.edit().putInt(KEY_REWARDED_TOKENS, rewardedPhotoTokens).apply();
+    }
+
+    public void resetRewardedTokens() {
+        rewardedPhotoTokens = 0;
+        preferences.edit().putInt(KEY_REWARDED_TOKENS, 0).apply();
+    }
+
     // --- Premium Status ---
     public boolean isPremiumUser() {
         return preferences.getBoolean(KEY_IS_PREMIUM, false);
@@ -198,8 +236,10 @@ public class UsageTracker {
                 .putInt(KEY_AD_COUNTER, 0)
                 .putInt(KEY_EXTRA_QUESTIONS, 0)
                 .putInt(KEY_EXTRA_IMAGE_CREDITS, 0)
+                .putInt(KEY_REWARDED_TOKENS, 0)
                 .putString(KEY_LAST_RESET_DATE, today) // Ensure last reset date is updated
                 .apply();
+        rewardedPhotoTokens = 0;
     }
 
     // FIXED: Added missing refreshUsageData method
@@ -239,7 +279,7 @@ public class UsageTracker {
 
     public String getImageUsageStatusMessage() {
         checkAndResetDailyUsage();
-        int remaining = getDailyImageLimit() + preferences.getInt(KEY_EXTRA_IMAGE_CREDITS, 0) - getDailyImageUsage();
+        int remaining = getDailyImageLimit() + preferences.getInt(KEY_EXTRA_IMAGE_CREDITS, 0) + rewardedPhotoTokens - getDailyImageUsage();
         remaining = Math.max(0, remaining);
 
         if (isPremiumUser()) {

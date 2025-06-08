@@ -22,7 +22,8 @@ android {
 
     buildTypes {
         getByName("release") {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -79,15 +80,13 @@ dependencies {
     implementation("com.google.mlkit:image-labeling:17.0.0")
 
     // AdMob for monetization
-    implementation("com.google.android.gms:play-services-ads:22.6.0")
+    implementation("com.google.android.gms:play-services-ads:23.1.0")
 
     // Google Play Billing
     implementation("com.android.billingclient:billing:6.1.0")
 
     // Play Services for App Updates
-    implementation("com.google.android.play:app-update:2.1.0")
-    implementation("com.google.android.play:app-update-ktx:2.1.0")
-    
+
     // Jetpack DataStore for modern preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 

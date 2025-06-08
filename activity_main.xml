@@ -256,9 +256,19 @@
             android:elevation="4dp"
             android:visibility="gone"
             android:scaleType="center" />
-
-
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/quotaView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="quota"
+        android:textSize="12sp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="8dp"
+        android:visibility="gone"/>
+
 
     <!-- Ad Banner (if not premium) -->
     <com.google.android.gms.ads.AdView
@@ -267,4 +277,35 @@
         android:layout_height="wrap_content"
         app:adSize="BANNER"
         app:adUnitId="@string/banner_ad_unit_id" /> <!-- Make sure this string resource exists -->
+        
+    <!-- GDPR consent banner displayed for first-time users -->
+    <LinearLayout
+        android:id="@+id/gdpr_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:background="#FFF9C4"
+        android:visibility="gone"
+        android:layout_gravity="bottom"
+        android:elevation="4dp">
+
+        <TextView
+            android:id="@+id/gdpr_notice_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Folosind aplicația, ești de acord cu politica noastră de confidențialitate. (Vezi aici https://gospodapp.ro/politica-confidentialitate)"
+            android:autoLink="web"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/gdpr_accept_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Accept"
+            android:textAllCaps="false"
+            android:visibility="gone" />
+    </LinearLayout>
 </LinearLayout>
