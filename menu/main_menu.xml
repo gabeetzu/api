@@ -1,0 +1,7 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/action_clear_chat" android:title="Șterge conversația"/>
+    <item android:id="@+id/action_premium" android:title="Upgrade Premium"/>
+    <item android:id="@+id/action_settings" android:title="Setări"/>
+    <item android:id="@+id/action_help" android:title="Ajutor"/>
+    <item android:id="@+id/action_social" android:title="Sociale"/>
+    </menu>

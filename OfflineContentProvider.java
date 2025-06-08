@@ -1,66 +1,42 @@
 package com.secretele.gospodarului;
 
-import okhttp3.OkHttpClient;
-import okhttp3.logging.HttpLoggingInterceptor;
-import retrofit2.Retrofit;
-import retrofit2.converter.gson.GsonConverterFactory;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import android.content.Context;
 
-import java.util.concurrent.TimeUnit;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
-public class ApiClient {
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
 
-    // Load environment-safe config values from BuildConfig
-    private static final String BASE_URL = BuildConfig.BASE_URL != null
-            ? BuildConfig.BASE_URL : "https://example.com/"; // fallback if unset
-    private static final String API_KEY = BuildConfig.API_KEY;
-    public static final String OPEN_WEATHER_KEY = BuildConfig.OPEN_WEATHER_KEY;
+public class OfflineContentProvider {
+    private final Context context;
+    private List<String> faq = new ArrayList<>();
 
-    private static Retrofit retrofit = null;
-
-    // Prevent instantiation
-    private ApiClient() {
-        throw new IllegalStateException("Utility class");
+    public OfflineContentProvider(Context ctx) {
+        this.context = ctx.getApplicationContext();
+        load();
     }
 
-    public static ApiService getApiService() {
-        return getClient().create(ApiService.class);
-    }
-
-    private static synchronized Retrofit getClient() {
-        if (retrofit == null) {
-            // Log basic request info, no body to protect secrets
-            HttpLoggingInterceptor logging = new HttpLoggingInterceptor();
-            logging.setLevel(HttpLoggingInterceptor.Level.BASIC);
-
-            // Use a lenient GSON parser
-            Gson gson = new GsonBuilder()
-                    .setLenient()
-                    .create();
-
-            // Configure OkHttp with timeouts and secure header injection
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .connectTimeout(30, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
-                    .writeTimeout(30, TimeUnit.SECONDS)
-                    .addInterceptor(chain -> {
-                        return chain.proceed(
-                                chain.request().newBuilder()
-                                        .addHeader("X-API-Key", API_KEY)
-                                        .build()
-                        );
-                    })
-                    .addInterceptor(logging)
-                    .build();
-
-            // Build Retrofit instance
-            retrofit = new Retrofit.Builder()
-                    .baseUrl(BASE_URL)
-                    .client(client)
-                    .addConverterFactory(GsonConverterFactory.create(gson))
-                    .build();
+    private void load() {
+        try {
+            InputStream is = context.getAssets().open("offline_content.json");
+            JsonObject obj = JsonParser.parseReader(new InputStreamReader(is)).getAsJsonObject();
+            JsonArray arr = obj.getAsJsonArray("faq");
+            if (arr != null) {
+                for (JsonElement el : arr) {
+                    faq.add(el.getAsString());
+                }
+            }
+            is.close();
+        } catch (Exception e) {
+            // ignore, leave faq empty
         }
-        return retrofit;
+    }
+    public List<String> getFaq() {
+        return faq;
     }
 }

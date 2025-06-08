@@ -36,7 +36,9 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Button;
 import android.widget.Toast;
+import android.media.MediaPlayer;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -46,6 +48,9 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.secretele.gospodarului.OfflineManager;
+import com.secretele.gospodarului.OfflineContentProvider;
 
 import com.google.android.gms.ads.AdRequest;
 import com.google.android.gms.ads.AdView;
@@ -92,6 +97,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private static final String CHANNEL_ID = "daily_tip_channel";
     private static final String KEY_CHAT_TEXT_SIZE = "chat_text_size";
     private static final int NOTIF_ID = 1001;
+
+    private static final String KEY_ONBOARDING_DONE = "onboarding_done";
     private static final int NOTIF_REQUEST_CODE = 2001;
 
     private static final String CNN_MODEL_FILE = "plant_model_5Classes.tflite";
@@ -146,8 +153,23 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
 
         // Privacy dialog (GDPR consent)
         privacyManager = new PrivacyManager(this);
+
+        TextView gdprNotice = findViewById(R.id.gdpr_notice_text);
+        Button gdprAccept = findViewById(R.id.gdpr_accept_button);
+        View gdprBanner = findViewById(R.id.gdpr_banner);
+
+
         if (privacyManager.shouldShowDisclaimer()) {
-            privacyManager.showPrivacyDialog(this);
+            gdprNotice.setVisibility(View.VISIBLE);
+            gdprAccept.setVisibility(View.VISIBLE);
+            gdprBanner.setVisibility(View.VISIBLE);
+
+            gdprAccept.setOnClickListener(v -> {
+                privacyManager.setDisclaimerShown();
+                gdprNotice.setVisibility(View.GONE);
+                gdprAccept.setVisibility(View.GONE);
+                gdprBanner.setVisibility(View.GONE);
+            });
         }
 
         // Initialize TFLite model (in background to avoid blocking UI)
@@ -165,9 +187,14 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         chatTextSizeSp = prefs.getFloat(KEY_CHAT_TEXT_SIZE, 16f);
         applyChatTextSize();
+        updateGDPRUI();
         initializeAds();
         loadInitialData();
 
+        if (!prefs.getBoolean(KEY_ONBOARDING_DONE, false)) {
+            showOnboarding();
+            prefs.edit().putBoolean(KEY_ONBOARDING_DONE, true).apply();
+        }
 
         createNotificationChannel();
         if (isNotificationsEnabled()) {
@@ -191,8 +218,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 fileDescriptor.getDeclaredLength()
         );
     }
-
-// ← DO NOT put a “}” here! (That was the stray brace you must remove.)
 
     // ─── initializeCoreComponents() ─────────────────────────────────────────────
     private void initializeCoreComponents() {
@@ -265,6 +290,10 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
 
     // ─── initializeAds() ───────────────────────────────────────────────────────
     private void initializeAds() {
+        if (usageTracker != null && usageTracker.isPremiumUser()) {
+            if (adView != null) adView.setVisibility(View.GONE);
+            return;
+        }
         MobileAds.initialize(this, initializationStatus -> { });
         AdRequest adRequest = new AdRequest.Builder().build();
         if (adView != null) adView.loadAd(adRequest);
@@ -794,27 +823,13 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 showPremiumUpgradeDialog();
                 return true;
             } else if (id == R.id.action_settings) {
-                showSettingsDialog();
+                showSettingsDialog(); // now contains increase/decrease text + others
                 return true;
-            } else if (id == R.id.action_increase_text) {
-                increaseTextSize();
+            } else if (id == R.id.action_help) {
+                showOnboarding();
                 return true;
-            } else if (id == R.id.action_privacy_policy) {
-                openLegalDocument("https://gospodapp.ro/politica-confidentialitate");
-                return true;
-            } else if (id == R.id.action_terms) {
-                openLegalDocument("https://gospodapp.ro/termeni-si-conditii");
-                return true;
-            } else if (id == R.id.action_notifications) {
-                showNotificationSettings();
-                return true;
-            } else if (id == R.id.action_revoke_consent) {
-                privacyManager.revokeConsent(MainActivity.this);
-                return true;
-            } else if (id == R.id.action_delete_data) {
-                privacyManager.deleteAllUserData();
-                Toast.makeText(this, "Toate datele au fost șterse", Toast.LENGTH_LONG).show();
-                recreate(); // Consider if this is the best user experience or if there's a less disruptive way
+            } else if (id == R.id.action_social) {
+                showSocialLinksDialog();
                 return true;
             } else {
                 return false;
@@ -885,11 +900,51 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         applyChatTextSize();
     }
 
+    private void decreaseTextSize() {
+        chatTextSizeSp -= 2f;
+        if (chatTextSizeSp < 16f) chatTextSizeSp = 16f;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putFloat(KEY_CHAT_TEXT_SIZE, chatTextSizeSp).apply();
+        applyChatTextSize();
+    }
+
+    private void updateGDPRUI() {
+        boolean consent = privacyManager.hasGDPRConsent();
+        editTextMessage.setEnabled(consent);
+        buttonCamera.setEnabled(consent);
+        buttonMicrophone.setEnabled(consent);
+    }
+
     private void showSettingsDialog() {
+        String[] options = {
+                "Mărește textul",
+                "Micșorează textul",
+                "Politica de Confidențialitate",
+                "Termeni și Condiții",
+                "Revocă consimțământul"
+        };
         new AlertDialog.Builder(this)
                 .setTitle("Setări")
-                .setMessage("Calendar plantare 2025:\n- Roșii: 15 aprilie\n- Castraveți: 1 mai\n- Ardei: 20 aprilie")
-                .setPositiveButton("OK", null)
+                .setItems(options, (dialog, which) -> {
+                    switch (which) {
+                        case 0:
+                            increaseTextSize();
+                            break;
+                        case 1:
+                            decreaseTextSize();
+                            break;
+                        case 2:
+                            openLegalDocument("https://gospodapp.ro/politica-confidentialitate");
+                            break;
+                        case 3:
+                            openLegalDocument("https://gospodapp.ro/termeni-si-conditii");
+                            break;
+                        case 4:
+                            privacyManager.revokeConsent(MainActivity.this);
+                            break;
+                    }
+                })
+                .setNegativeButton("Închide", null)
                 .show();
     }
 
@@ -952,7 +1007,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
             textToSpeech.setPitch(0.9f);
             textToSpeech.setSpeechRate(0.9f);
-            maybeShowVoiceTutorial();
         } else {
             Log.e(TAG, "Inițializarea TTS a eșuat: " + status);
         }
@@ -968,26 +1022,60 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             );
         }
     }
-
-    private void maybeShowVoiceTutorial() {
-        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
-        if (!sp.getBoolean("voice_tutorial_shown", false)) {
-            String tut = "Bine ați venit! Folosiți butonul microfon pentru întrebări vocale și camera pentru fotografii.";
-            if (textToSpeech != null) {
-                textToSpeech.speak(tut, TextToSpeech.QUEUE_ADD, null, "tutorial");
-            }
-            sp.edit().putBoolean("voice_tutorial_shown", true).apply();
+    private void showOnboarding() {
+        new AlertDialog.Builder(this)
+                .setTitle("Bun venit la GospodApp")
+                .setMessage("Fotografiază plantele cu butonul cameră și pune întrebări cu microfonul sau tastatura. Pentru a reasculta acest ghid apasă Ajutor din meniu.")
+                .setPositiveButton("Închide", null)
+                .show();
+        try {
+            MediaPlayer mp = new MediaPlayer();
+            AssetFileDescriptor afd = getAssets().openFd("onboarding.mp3");
+            mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            mp.setOnCompletionListener(MediaPlayer::release);
+            mp.prepare();
+            mp.start();
+        } catch (Exception e) {
+            // Silently ignore if audio fails
         }
     }
 
+    private void showSocialLinksDialog() {
+        String[] options = {"Facebook", "Instagram", "YouTube", "TikTok"};
+        String[] urls = {
+                "https://www.facebook.com/secretelegospodarului",
+                "https://www.instagram.com/secretele.gospodarului/",
+                "https://www.youtube.com/@secretele.gospodarului",
+                "https://www.tiktok.com/@secretele.gospodarului"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Urmărește-ne")
+                .setItems(options, (d, which) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(urls[which])));
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Link indisponibil", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Închide", null)
+                .show();
+    }
     private void showOfflineContent() {
         if (offlineContentProvider == null) return;
         List<String> faq = offlineContentProvider.getFaq();
+        StringBuilder sb = new StringBuilder();
         if (!faq.isEmpty()) {
-            StringBuilder sb = new StringBuilder("Poți citi aceste sfaturi offline:\n");
+            sb.append("Poți citi aceste sfaturi offline:\n");
             for (String f : faq) sb.append("• ").append(f).append("\n");
-            addBotMessageToChat(sb.toString());
         }
+        if (offlineManager != null) {
+            List<String> cache = offlineManager.getCachedResponses();
+            if (!cache.isEmpty()) {
+                sb.append("\nRăspunsuri recente:\n");
+                for (String r : cache) sb.append("• ").append(r).append("\n");
+            }
+        }
+        if (sb.length() > 0) addBotMessageToChat(sb.toString());
     }
 
 
@@ -1002,6 +1090,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     protected void onResume() {
         super.onResume();
         Log.d(TAG, "onResume");
+        updateGDPRUI();
         if (adView != null && usageTracker != null && !usageTracker.isPremiumUser()) {
             adView.resume();
         }
@@ -1270,3 +1359,5 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
 }
+
+

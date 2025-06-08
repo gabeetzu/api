@@ -13,7 +13,7 @@ public class TextSizeManager {
     
     private static final String PREF_NAME = "text_size_prefs";
     private static final String KEY_TEXT_SIZE = "text_size";
-    private static final float DEFAULT_TEXT_SIZE = 24.0f;
+    private static final float DEFAULT_TEXT_SIZE = 26.0f;
     private static final float MIN_TEXT_SIZE = 18.0f;
     private static final float MAX_TEXT_SIZE = 32.0f;
     

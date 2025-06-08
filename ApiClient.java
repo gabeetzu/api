@@ -46,9 +46,9 @@ public class ApiClient {
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .addInterceptor(chain -> {
                         return chain.proceed(
-                            chain.request().newBuilder()
-                                .addHeader("X-API-Key", API_KEY)
-                                .build()
+                                chain.request().newBuilder()
+                                        .addHeader("X-API-Key", API_KEY)
+                                        .build()
                         );
                     })
                     .addInterceptor(logging)

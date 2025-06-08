@@ -125,7 +125,7 @@ public class UsageTracker {
     }
 
     public int getDailyImageLimit() {
-        return isPremiumUser() ? 50 : 10;
+        return isPremiumUser() ? 10 : 1;
     }
 
     // --- Ad Management ---
