@@ -46,7 +46,8 @@ try {
 
     $userMessage = sanitizeInput($input['message'] ?? '');
     $imageBase64 = $input['image'] ?? '';
-        if ($imageBase64 && strlen($imageBase64) > 4 * 1024 * 1024) {
+        // Limit uploaded images to 3MB to keep requests lightweight
+    if ($imageBase64 && strlen($imageBase64) > 3 * 1024 * 1024) {
         throw new Exception('Imaginea depășește 3MB.');
     }
     if ($imageBase64 && !preg_match('/^[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
