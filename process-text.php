@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // --- API Key Validation ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-$expectedKey = getenv('API_SECRET_KEY');
+$expectedKey = getenv('API_SECRET_KEY') ?: '';
 if (!hash_equals($expectedKey, $apiKey)) {
     logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
