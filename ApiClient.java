@@ -6,16 +6,20 @@ import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+
 import java.util.concurrent.TimeUnit;
 
 public class ApiClient {
-    private static final String BASE_URL = "https://gabeetzu-project.onrender.com/";
-    private static final String API_KEY = "7s$!nVpWb3YqZt6w9z$C&F)J@NcRfUjXn";
-    public static final String OPEN_WEATHER_KEY = "fc32e89a6779a53497f25a690a4d6398";
+
+    // Load environment-safe config values from BuildConfig
+    private static final String BASE_URL = BuildConfig.BASE_URL != null
+            ? BuildConfig.BASE_URL : "https://example.com/"; // fallback if unset
+    private static final String API_KEY = BuildConfig.API_KEY;
+    public static final String OPEN_WEATHER_KEY = BuildConfig.OPEN_WEATHER_KEY;
+
     private static Retrofit retrofit = null;
 
-    // Remove singleton instance for ApiClient (not needed)
-    // Private constructor to prevent instantiation
+    // Prevent instantiation
     private ApiClient() {
         throw new IllegalStateException("Utility class");
     }
@@ -26,26 +30,31 @@ public class ApiClient {
 
     private static synchronized Retrofit getClient() {
         if (retrofit == null) {
+            // Log basic request info, no body to protect secrets
             HttpLoggingInterceptor logging = new HttpLoggingInterceptor();
-            logging.setLevel(HttpLoggingInterceptor.Level.BASIC); // Reduced from BODY for security
+            logging.setLevel(HttpLoggingInterceptor.Level.BASIC);
 
+            // Use a lenient GSON parser
             Gson gson = new GsonBuilder()
                     .setLenient()
                     .create();
 
+            // Configure OkHttp with timeouts and secure header injection
             OkHttpClient client = new OkHttpClient.Builder()
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .readTimeout(30, TimeUnit.SECONDS)
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .addInterceptor(chain -> {
-                        var request = chain.request().newBuilder()
+                        return chain.proceed(
+                            chain.request().newBuilder()
                                 .addHeader("X-API-Key", API_KEY)
-                                .build();
-                        return chain.proceed(request);
+                                .build()
+                        );
                     })
                     .addInterceptor(logging)
                     .build();
 
+            // Build Retrofit instance
             retrofit = new Retrofit.Builder()
                     .baseUrl(BASE_URL)
                     .client(client)
