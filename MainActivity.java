@@ -73,6 +73,8 @@ import java.util.Locale;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 
 public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
 
@@ -117,6 +119,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private ApiService apiService;
     private TextToSpeech textToSpeech;
     private UsageTracker usageTracker;
+    private OfflineManager offlineManager;
+    private OfflineContentProvider offlineContentProvider;
     private ChatHistoryManager chatHistoryManager;
     private AbuseFilter abuseFilter;
     private DailyTipProvider dailyTipProvider;
@@ -195,6 +199,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         Log.d(TAG, "Initializing core components...");
         apiService = ApiClient.getApiService();
         usageTracker = new UsageTracker(this);
+        offlineManager = new OfflineManager(this);
+        offlineContentProvider = new OfflineContentProvider(this);
         chatHistoryManager = new ChatHistoryManager(this);
         abuseFilter = new AbuseFilter(this);
         dailyTipProvider = new DailyTipProvider(this);
@@ -329,6 +335,10 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         addLoadingMessageToChat(loadingMsg);
         if (image != null) startImageLoadingAnimation();
 
+        android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        android.net.NetworkInfo ni = cm != null ? cm.getActiveNetworkInfo() : null;
+        boolean offline = ni == null || !ni.isConnected();
+
         new Thread(() -> {
             try {
                 JsonObject request = new JsonObject();
@@ -359,6 +369,17 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     request.addProperty("weather", weather);
                 }
 
+                if (offline) {
+                    offlineManager.enqueue(request);
+                    runOnUiThread(() -> {
+                        removeLoadingMessageFromChat();
+                        clearSelectedImage();
+                        addBotMessageToChat("Conexiune indisponibilă. Întrebarea a fost salvată.");
+                        showOfflineContent();
+                    });
+                    return;
+                }
+
                 runOnUiThread(() -> {
                     apiService.processRequest(request).enqueue(new Callback<JsonObject>() {
                         @Override
@@ -375,6 +396,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                                     if (body.has("success") && body.get("success").getAsBoolean()) {
                                         String botResponse = safeGetResponse(body);
                                         addBotMessageToChat(botResponse);
+                                        if (offlineManager != null) offlineManager.cacheResponse(botResponse);
                                         usageTracker.recordTextAPICall();
                                     } else {
                                         String error = body.has("error") && body.get("error").isJsonPrimitive()
@@ -930,6 +952,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
             textToSpeech.setPitch(0.9f);
             textToSpeech.setSpeechRate(0.9f);
+            maybeShowVoiceTutorial();
         } else {
             Log.e(TAG, "Inițializarea TTS a eșuat: " + status);
         }
@@ -946,6 +969,28 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         }
     }
 
+    private void maybeShowVoiceTutorial() {
+        SharedPreferences sp = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!sp.getBoolean("voice_tutorial_shown", false)) {
+            String tut = "Bine ați venit! Folosiți butonul microfon pentru întrebări vocale și camera pentru fotografii.";
+            if (textToSpeech != null) {
+                textToSpeech.speak(tut, TextToSpeech.QUEUE_ADD, null, "tutorial");
+            }
+            sp.edit().putBoolean("voice_tutorial_shown", true).apply();
+        }
+    }
+
+    private void showOfflineContent() {
+        if (offlineContentProvider == null) return;
+        List<String> faq = offlineContentProvider.getFaq();
+        if (!faq.isEmpty()) {
+            StringBuilder sb = new StringBuilder("Poți citi aceste sfaturi offline:\n");
+            for (String f : faq) sb.append("• ").append(f).append("\n");
+            addBotMessageToChat(sb.toString());
+        }
+    }
+
+
     // ─── Toggle TTS On/Off ─────────────────────────────────────────────────────
     private void toggleTTS() {
         isTTSEnabled = !isTTSEnabled;
@@ -961,6 +1006,21 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             adView.resume();
         }
         if (usageTracker != null) usageTracker.refreshUsageData();
+        if (offlineManager != null) {
+            offlineManager.retry(apiService, new Callback<JsonObject>() {
+                @Override
+                public void onResponse(@NonNull Call<JsonObject> call, @NonNull Response<JsonObject> response) {
+                    if (response.isSuccessful() && response.body() != null) {
+                        String r = safeGetResponse(response.body());
+                        addBotMessageToChat(r);
+                        offlineManager.cacheResponse(r);
+                    }
+                }
+
+                @Override
+                public void onFailure(@NonNull Call<JsonObject> call, @NonNull Throwable t) { }
+            });
+        }
     }
 
     @Override
@@ -1210,5 +1270,3 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
 }
-
-
