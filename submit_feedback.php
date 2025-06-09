@@ -31,6 +31,11 @@ $entry = [
     'image' => $data['image'] ?? 'none'
 ];
 
+if (!is_writable('/data')) {
+    error_log('❌ /data not writable');
+}
+error_log("✅ Feedback received: " . json_encode($entry));
+
 $csvLine = '"' . implode('","', array_map('addslashes', $entry)) . '"' . PHP_EOL;
 file_put_contents('/data/corrections.csv', $csvLine, FILE_APPEND);
 
