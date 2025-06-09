@@ -120,7 +120,7 @@ PROMPT
         $userContent = <<<TEXT
 Imaginea a fost analizată automat de un model AI specializat în boli ale plantelor, antrenat pe imagini de frunze.
 
-Modelul a identificat următoarea clasă: "$cnnDiagnosis" (încredere estimată: {$cnnConfidence * 100}%)
+Modelul a identificat următoarea clasă: "$cnnDiagnosis" (încredere estimată: {$confidencePercent}%)
 
 Aceste informații au fost generate automat. Utilizatorul poate adăuga și alte detalii manual.
 
@@ -128,7 +128,6 @@ $featuresText
 
 Întrebarea sau observația utilizatorului (dacă a fost trimisă): $userMessage
 TEXT;
-
         if ($featuresText) {
         
     } elseif (!empty($imageBase64)) {
