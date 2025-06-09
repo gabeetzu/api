@@ -62,14 +62,25 @@ try {
     if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
         throw new Exception('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.');
     }
-
+    
+    $isPremium = filter_var($input['is_premium'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    
     if (!empty($deviceHash)) {
         validateDeviceHash($deviceHash);
         logEvent('Device', $deviceHash);
+        
+        $stmt = $pdo->prepare("SELECT pending_deletion, deletion_due_at FROM usage_tracking WHERE device_hash = ?");
+        $stmt->execute([$deviceHash]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && $row['pending_deletion']) {
+            http_response_code(403);
+            echo jsonResponse(false, "Contul t\u0103u este programat pentru \u0219tergere. Accesul este restric\u021bionat pentru 7 zile.");
+            exit();
+        }
     }
 
      $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
-    if (!checkRateLimit($rateId)) {
+    if (!checkRateLimit($rateId, 30, 3600, $isPremium)) {
         http_response_code(429);
         echo jsonResponse(false, 'Prea multe cereri, încearcă mai târziu.');
         exit();
@@ -351,7 +362,8 @@ function logEvent($label, $data) {
     file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
 }
 
-function checkRateLimit($id, $limit = 30, $window = 3600) {
+function checkRateLimit($id, $limit = 30, $window = 3600, $isPremium = false) {
+    if ($isPremium) return true;
     $dir = sys_get_temp_dir() . '/gospod_rl';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
     $file = $dir . '/' . sha1($id) . '.json';
