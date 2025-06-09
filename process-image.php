@@ -56,6 +56,7 @@ try {
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
     $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
     $cnnConfidence = max(0, min(1, $cnnConfidence));
+    $confidencePercent = round($cnnConfidence * 100);
     $weather = sanitizeInput($input['weather'] ?? '');
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
 
@@ -115,6 +116,7 @@ PROMPT
         $features = analyzeImageFeatures($imageBase64);
         $featuresText = formatFeaturesText($features);
     }
+    
     if (!empty($cnnDiagnosis) && $cnnConfidence >= 0.75) {
         // High confidence diagnosis
         $userContent = <<<TEXT
@@ -128,27 +130,26 @@ $featuresText
 
 Întrebarea sau observația utilizatorului (dacă a fost trimisă): $userMessage
 TEXT;
-        if ($featuresText) {
-        
+              
     } elseif (!empty($imageBase64)) {
         // Image provided without much text
         $warning = '';
-    if ($cnnConfidence < 0.6) {
-    $warning = "Imaginea a fost analizată, dar rezultatul nu este sigur. Te rugăm să descrii simptomele sau să trimiți o altă fotografie pentru un diagnostic mai clar.\n\n";
-    }
+           if ($cnnConfidence < 0.6) {
+            $warning = "Imaginea a fost analizată, dar rezultatul nu este sigur. Te rugăm să descrii simptomele sau să trimiți o altă fotografie pentru un diagnostic mai clar.\n\n";
+        }
 
-    if (strlen(trim($userMessage)) === 0) {
-        $userContent = "Analizează doar fotografia. Nu presupune că utilizatorul a descris culori sau simptome. Oferă un răspuns vizual bazat pe imagine și cere detalii suplimentare dacă este cazul.\n\n" . $warning;
-    } else {
-        $userContent = $userMessage . "\n\n" . $warning;
-    }
+        if (strlen(trim($userMessage)) === 0) {
+            $userContent = "Analizează doar fotografia. Nu presupune că utilizatorul a descris culori sau simptome. Oferă un răspuns vizual bazat pe imagine și cere detalii suplimentare dacă este cazul.\n\n" . $warning;
+        } else {
+            $userContent = $userMessage . "\n\n" . $warning;
+        }
 
-    if ($featuresText) {
-        $userContent .= "Caracteristici observate: $featuresText";
-    }
-    if (!empty($cnnDiagnosis)) {
-        $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis";
-    }
+        if ($featuresText) {
+            $userContent .= "Caracteristici observate: $featuresText";
+        }
+        if (!empty($cnnDiagnosis)) {
+            $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis";
+        }
         
     } else {
         $userContent = $userMessage;
@@ -185,7 +186,8 @@ TEXT;
         ]
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-} catch (Exception $e) {
+}
+catch (Exception $e) {
     logEvent('Error', $e->getMessage());
     http_response_code(400);
     echo json_encode([
@@ -212,7 +214,7 @@ function analyzeImageFeatures($base64) {
     $opts = ['http' => [
         'header'  => "Content-Type: application/json\r\n",
         'method'  => 'POST',
-        'content' => json_encode($body)
+        'content' => json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
     ]];
     $context = stream_context_create($opts);
     $res = @file_get_contents($url, false, $context);
@@ -266,7 +268,7 @@ function getGPTResponse(array $messages, $retries = 2) {
                 'temperature' => 0.7,
                 'max_tokens' => 1200,
                 'top_p' => 0.9
-            ])
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         ]);
         $res = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -370,7 +372,7 @@ function jsonResponse($success, $payload) {
 function logEvent($label, $data) {
     $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
-    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
     file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
 }
 
@@ -389,7 +391,7 @@ function checkRateLimit($id, $limit = 30, $window = 3600, $isPremium = false) {
             $data['count']++;
         }
     }
-    file_put_contents($file, json_encode($data));
+    file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     return $data['count'] <= $limit;
 }
 
