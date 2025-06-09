@@ -124,20 +124,23 @@ PROMPT
     } elseif (!empty($imageBase64)) {
         // Image provided without much text
         $warning = '';
-        if ($cnnConfidence < 0.6) {
-            $warning = "Imaginea pare neclară. Dacă poți, trimite alta sau descrie ce vezi.\n\n";
-        }
-        if (strlen($userMessage) === 0) {
-            $userContent = "Analizează doar fotografia. Nu spune că utilizatorul a menționat culori sau alte informații. " . $warning;
-        } else {
-            $userContent = $userMessage . "\n\n" . $warning;
-        }
-        if ($featuresText) {
-            $userContent .= "Caracteristici observate: $featuresText";
-        }
-        if (!empty($cnnDiagnosis)) {
-            $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis";
-        }
+    if ($cnnConfidence < 0.6) {
+        $warning = "Imaginea pare neclară. Dacă poți, trimite alta sau descrie ce vezi pentru un diagnostic mai precis.\n\n";
+    }
+
+    if (strlen(trim($userMessage)) === 0) {
+        $userContent = "Analizează doar fotografia. Nu presupune că utilizatorul a descris culori sau simptome. Oferă un răspuns vizual bazat pe imagine și cere detalii suplimentare dacă este cazul.\n\n" . $warning;
+    } else {
+        $userContent = $userMessage . "\n\n" . $warning;
+    }
+
+    if ($featuresText) {
+        $userContent .= "Caracteristici observate: $featuresText";
+    }
+    if (!empty($cnnDiagnosis)) {
+        $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis";
+    }
+        
     } else {
         $userContent = $userMessage;
     }
