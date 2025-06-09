@@ -1,4 +1,9 @@
 <?php
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    $log = "[" . date("Y-m-d H:i:s") . "] PHP ERROR: $errstr in $errfile on line $errline\n";
+    file_put_contents("/var/data/logs/errors.csv", $log, FILE_APPEND);
+});
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
