@@ -117,15 +117,25 @@ PROMPT
     }
     if (!empty($cnnDiagnosis) && $cnnConfidence >= 0.75) {
         // High confidence diagnosis
-        $userContent = "Diagnostic AI: $cnnDiagnosis\nÎntrebarea utilizatorului: $userMessage";
+        $userContent = <<<TEXT
+Imaginea a fost analizată automat de un model AI specializat în boli ale plantelor, antrenat pe imagini de frunze.
+
+Modelul a identificat următoarea clasă: "$cnnDiagnosis" (încredere estimată: {$cnnConfidence * 100}%)
+
+Aceste informații au fost generate automat. Utilizatorul poate adăuga și alte detalii manual.
+
+$featuresText
+
+Întrebarea sau observația utilizatorului (dacă a fost trimisă): $userMessage
+TEXT;
+
         if ($featuresText) {
-            $userContent .= "\n\nImagine: $featuresText";
-        }
+        
     } elseif (!empty($imageBase64)) {
         // Image provided without much text
         $warning = '';
     if ($cnnConfidence < 0.6) {
-        $warning = "Imaginea pare neclară. Dacă poți, trimite alta sau descrie ce vezi pentru un diagnostic mai precis.\n\n";
+    $warning = "Imaginea a fost analizată, dar rezultatul nu este sigur. Te rugăm să descrii simptomele sau să trimiți o altă fotografie pentru un diagnostic mai clar.\n\n";
     }
 
     if (strlen(trim($userMessage)) === 0) {
