@@ -31,9 +31,20 @@ $entry = [
     'image' => $data['image'] ?? 'none'
 ];
 
-if (!is_writable('/data')) {
-    error_log('❌ /data not writable');
+$logPath = "/data/corrections.csv";
+
+// Create file if it doesn't exist (so we can check writability)
+if (!file_exists($logPath)) {
+    @touch($logPath);
 }
+
+// Final check
+if (!is_writable($logPath)) {
+    error_log("❌ corrections.csv is not writable!");
+} else {
+    error_log("✅ corrections.csv is writable");
+}
+
 error_log("✅ Feedback received: " . json_encode($entry));
 
 $csvLine = '"' . implode('","', array_map('addslashes', $entry)) . '"' . PHP_EOL;
