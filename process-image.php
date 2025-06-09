@@ -111,22 +111,21 @@ PROMPT
             $userContent .= "\n\nImagine: $featuresText";
         }
     } elseif (!empty($imageBase64)) {
-        // Low confidence or no diagnosis but image is present
-                $warning = '';
+        // Image provided without much text
+        $warning = '';
         if ($cnnConfidence < 0.6) {
-            $warning = "Imaginea nu a fost foarte clară. Dacă poți, trimite o altă poză sau descrie ce vezi (pete, culoare, formă).\n\n";
+            $warning = "Imaginea pare neclară. Dacă poți, trimite alta sau descrie ce vezi.\n\n";
         }
-        $userContent = $warning . <<<TEXT
-Utilizatorul a trimis o fotografie cu o frunză. Nu a oferit descrieri. Pe baza analizei automate, s-au detectat:
-
-$featuresText
-
-Răspunde politicos, scurt și empatic, ca pentru un utilizator începător. Nu spune niciodată că utilizatorul a menționat aceste simptome.
-TEXT;
-        if (!empty($cnnDiagnosis) && $cnnConfidence < 0.75) {
-            $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis (nesigur). Cere utilizatorului mai multe detalii.";
-        } elseif ($cnnConfidence < 0.75) {
-            $userContent .= "\n\nNotă: Modelul AI a fost nesigur. Întreabă utilizatorul mai multe detalii despre imagine.";
+        if (strlen($userMessage) === 0) {
+            $userContent = "Analizează doar fotografia. Nu spune că utilizatorul a menționat culori sau alte informații. " . $warning;
+        } else {
+            $userContent = $userMessage . "\n\n" . $warning;
+        }
+        if ($featuresText) {
+            $userContent .= "Caracteristici observate: $featuresText";
+        }
+        if (!empty($cnnDiagnosis)) {
+            $userContent .= "\n\nSugestie de diagnostic: $cnnDiagnosis";
         }
     } else {
         $userContent = $userMessage;
