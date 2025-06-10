@@ -59,6 +59,13 @@ try {
         throw new Exception('Format imagine invalid.');
     }
     $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
+    $label = $cnnDiagnosis;
+    if (!$label || $label === 'unknown') {
+        $label = 'necunoscută';
+    }
+    $imageId = substr(sha1($imageBase64 ?: microtime()), 0, 8);
+    error_log("🌿 [CNN label] $label for image $imageId", 3, "/var/log/gospodapp.log");
+
     $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
     $cnnConfidence = max(0, min(1, $cnnConfidence));
     $confidencePercent = round($cnnConfidence * 100);
@@ -163,6 +170,8 @@ TEXT;
     if (!empty($weather)) {
         $userContent .= "\n\nCondiții meteo: $weather";
     }
+    $finalPrompt = "Imagine analizată: pare a fi o frunză afectată de: $label. Oferă sfaturi legate de această boală, chiar dacă e incertă. Rămâi pozitiv și empatic.";
+    $userContent = $finalPrompt . "\n\n" . $userContent;
     $currentUserMessage = ['role' => 'user', 'content' => $userContent];
 
     $messagesForGPT = array_merge([$systemMessage], $historyMessages, [$currentUserMessage]);
