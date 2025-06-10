@@ -71,6 +71,12 @@ try {
     $confidencePercent = round($cnnConfidence * 100);
     $weather = sanitizeInput($input['weather'] ?? '');
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
+    $refCode    = sanitizeInput($input['ref_code'] ?? '');
+    $referralReward = false;
+    $userName = sanitizeInput($input['user_name'] ?? '');
+    if ($userName && !preg_match('/^[\p{L}\p{M} \'-]{2,30}$/u', $userName)) {
+        throw new Exception('Nume invalid');
+    }
 
     if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
         throw new Exception('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.');
@@ -90,6 +96,23 @@ try {
             echo jsonResponse(false, "Contul t\u0103u este programat pentru \u0219tergere. Accesul este restric\u021bionat pentru 7 zile.");
             exit();
         }
+
+        // --- Referral Handling ---
+        if (!empty($refCode) && $refCode !== $deviceHash) {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM referrals WHERE invited_hash = ?");
+            $stmt->execute([$deviceHash]);
+            $alreadyReferred = $stmt->fetchColumn() > 0;
+
+            if (!$alreadyReferred) {
+                $stmt = $pdo->prepare("INSERT IGNORE INTO referrals (inviter_hash, invited_hash) VALUES (?, ?)");
+                $stmt->execute([$refCode, $deviceHash]);
+
+                $stmt = $pdo->prepare("\n      UPDATE usage_tracking\n         SET premium = 1,\n             premium_until = DATE_ADD(NOW(), INTERVAL 30 DAY)\n       WHERE device_hash IN (?, ?)\n    ");
+                $stmt->execute([$refCode, $deviceHash]);
+
+                $referralReward = true;
+            }
+        }        
     }
 
      $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
@@ -106,13 +129,26 @@ try {
         trackUsage($pdo, $deviceHash, 'text');
     }
 
+    if ($deviceHash && $userName) {
+        $stmt = $pdo->prepare("\n        UPDATE usage_tracking\n           SET user_name = :name\n         WHERE device_hash = :hash\n           AND date = CURDATE()\n    ");
+        $stmt->execute([':name' => $userName, 'hash' => $deviceHash]);
+    }
+
     // Load conversation history (last 10 messages)
     $historyMessages = loadRecentMessages($pdo, $deviceHash, 10);
 
+    $storedName = '';
+    if ($deviceHash) {
+        $stmt = $pdo->prepare("\n            SELECT user_name FROM usage_tracking\n             WHERE device_hash = :hash AND user_name IS NOT NULL\n             ORDER BY date DESC LIMIT 1\n        ");
+        $stmt->execute([':hash' => $deviceHash]);
+        $storedName = $stmt->fetchColumn() ?: '';
+    }
+
+    $greet = $storedName ? "Vorbește pe nume: $storedName.\n" : '';
     // System instruction for GPT
     $systemMessage = [
         'role' => 'system',
-        'content' => <<<PROMPT
+        'content' => $greet . <<<PROMPT
 Ești un vecin amabil și priceput la grădinărit. Răspunde pe scurt, călduros și încurajator.
 Include sfaturi practice și menționează, dacă este specificat, condițiile meteo curente.
 Oferă soluții ecologice și aprobate local. Dacă informațiile sunt puține sau imaginea nu este clară, cere cu delicatețe detalii suplimentare.
@@ -197,7 +233,8 @@ TEXT;
         'response' => [
             'text' => $formattedText,
             'raw' => $responseText
-        ]
+        ],
+        'reward' => $referralReward ? 'referral_success' : null
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
 }
