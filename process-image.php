@@ -5,7 +5,13 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 });
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+$allowedOrigins = ['https://gospodapp.netlify.app', 'https://gospodapp.ro'];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowedOrigins)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+} else {
+    header('Access-Control-Allow-Origin: *');
+}
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
@@ -22,7 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // --- API Key Validation ---
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 $expectedKey = getenv('API_SECRET_KEY');
-if (!hash_equals($expectedKey, $apiKey)) {
+
+if ($expectedKey && !hash_equals($expectedKey, $apiKey)) {
     logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
     http_response_code(401);
     echo jsonResponse(false, 'Acces neautorizat');
