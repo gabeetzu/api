@@ -26,15 +26,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // --- API Key Validation ---
-$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-$expectedKey = getenv('API_SECRET_KEY');
+//$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+//$expectedKey = getenv('API_SECRET_KEY');
 
-if ($expectedKey && !hash_equals($expectedKey, $apiKey)) {
-    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
-    http_response_code(401);
-    echo jsonResponse(false, 'Acces neautorizat');
-    exit();
-}
+//if ($expectedKey && !hash_equals($expectedKey, $apiKey)) {
+//    logEvent('Unauthorized', ['ip' => $_SERVER['REMOTE_ADDR']]);
+//    http_response_code(401);
+//    echo jsonResponse(false, 'Acces neautorizat');
+//    exit();
+//}
 
 // --- Database Connection ---
 try {
