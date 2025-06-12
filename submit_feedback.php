@@ -69,4 +69,10 @@ error_log("✅ Feedback received: " . json_encode($entry));
 $csvLine = '"' . implode('","', array_map('addslashes', $entry)) . '"' . PHP_EOL;
 file_put_contents($logPath, $csvLine, FILE_APPEND);
 
-echo json_encode(['success' => true, 'message' => 'Feedback salvat. Mulțumim!']);
+echo json_encode([
+    'success'  => true,
+    'response' => [
+        'text' => 'Feedback salvat. Mulțumim!',
+        'raw'  => 'Feedback salvat. Mulțumim!'
+    ]
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
