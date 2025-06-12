@@ -652,7 +652,7 @@ document.documentElement.style.setProperty('--chat-font-scale', savedScale);
 fontSizeRange.value = savedScale;
 
 const tipDiv = document.getElementById('tip');
-tipDiv.textContent = tips.getTodaysTip();
+if (tipDiv) tipDiv.textContent = tips.getTodaysTip();
 const welcomeDiv = document.getElementById('welcome');
 const editNameBtn = document.getElementById('edit-name');
 
@@ -665,6 +665,7 @@ function setUserName(name){
 }
 
 function showWelcome(first){
+  if(!welcomeDiv || !editNameBtn) return;
   const name = getUserName();
   if(name){
     const last = name.trim().split(/\s+/).pop();
@@ -679,7 +680,9 @@ function showWelcome(first){
     editNameBtn.classList.add('hidden');
   }
 }
-showWelcome();␊
+if (welcomeDiv && editNameBtn) {
+  showWelcome();
+}
 const imageInput = fileInput;
 // sendBtn already defined above
 const shareBtn = document.getElementById('share-ref');
@@ -769,7 +772,7 @@ function showTyping() {
   const typing = document.createElement('div');
   typing.id = 'typing';
   typing.textContent = 'GPT scrie...';
-  typing.className = 'message bot';␊
+  typing.className = 'message bot';
   chatWindow.appendChild(typing);
 }
 
@@ -936,11 +939,13 @@ function sendFeedback(){
     alert(e.message);
   });
 }
-shareBtn.addEventListener('click', shareReferral);
-feedbackBtn.addEventListener('click', () => {
-  feedbackModal.classList.remove('hidden');
-});
-sendFeedbackBtn.addEventListener('click', sendFeedback);
+if (shareBtn) shareBtn.addEventListener('click', shareReferral);
+if (feedbackBtn && feedbackModal) {
+  feedbackBtn.addEventListener('click', () => {
+    feedbackModal.classList.remove('hidden');
+  });
+}
+if (sendFeedbackBtn) sendFeedbackBtn.addEventListener('click', sendFeedback);
 
 // GDPR modal
 const modal = document.getElementById('gdpr-modal');
@@ -967,10 +972,12 @@ saveNameBtn.addEventListener('click', () => {
     showWelcome(true);
   }
 });
-editNameBtn.addEventListener('click', () => {
-  localStorage.removeItem('user_name');
-  location.reload();
-});
+if (editNameBtn) {
+  editNameBtn.addEventListener('click', () => {
+    localStorage.removeItem('user_name');
+    location.reload();
+  });
+}
 
 Trophies.checkAll();
 Trophies.render();
