@@ -24,26 +24,34 @@
       <button id="save-name">Salvează</button>
     </div>
   </div>
-  <header class="topbar">
-    <h1>GospodApp – Grădinărit fără bătăi de cap</h1>
-    <button id="menuBtn" class="menu-btn">⋮</button>
-    <nav id="menuDropdown" class="menu-dropdown hidden">
-  <button id="settingsBtn">⚙️ Setări</button>
-  <button id="helpBtn">❓ Ajutor</button>
-  <button id="socialBtn">📣 Rețele Sociale</button>
-  <button id="premiumBtn">💎 Premium</button>
-  <button id="inviteBtn">👥 Invită prieteni</button>
-  <button id="privacyBtn">🔒 Politica de confidențialitate</button>
-</nav>
+  <header class="app-header">
+    <img src="icons/icon-48.png" class="logo" alt="GospodApp logo">
+    <h1 class="title">GospodApp – Grădinărit fără bătăi de cap</h1>
+    <div class="menu-wrapper">
+      <button id="menu-btn" aria-label="Meniu">
+        <span class="burger"></span>
+      </button>
+      <div class="menu-label">Meniu</div>
+    </div>
   </header>
-  <main id="chatWindow" class="chat-window"></main>
-  <footer class="input-bar">
-    <button id="attachBtn" class="icon-btn">📷</button>
-    <input id="messageInput" type="text" placeholder="Scrie o întrebare…" />
-    <button id="micBtn" class="icon-btn">🎤</button>
-    <button id="sendBtn" class="send-btn">Trimite</button>
-  </footer>
-  <input type="file" id="image" accept="image/*" class="hidden">
+  <nav id="side-menu" class="side-menu hidden">
+    <button id="settingsBtn">⚙️ Setări</button>
+    <button id="helpBtn">❓ Ajutor</button>
+    <button id="socialBtn">📣 Rețele sociale</button>
+    <button id="premiumBtn">💎 Premium</button>
+    <button id="inviteBtn">👥 Invită prieteni</button>
+    <button id="privacyBtn">🔒 Politica de confidențialitate</button>
+  </nav>
+  <div id="chatWindow" class="chat-container"></div>
+  <div class="chat-input-bar">
+    <button id="camera-btn" class="icon-btn"><img src="icons/camera.svg" alt="camera"></button>
+    <div class="text-area-wrapper">
+      <input id="message-input" type="text" placeholder="Întreabă despre grădinărit…" />
+      <button id="mic-btn" class="icon-btn"><img src="icons/microphone.svg" alt="mic"></button>
+    </div>
+    <button id="send-btn" class="icon-btn send hidden"><img src="icons/send.svg" alt="send"></button>
+    <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
+  </div>
   <div id="feedback-modal" class="modal hidden">
     <div class="modal-content">
       <textarea id="feedback-text" rows="4" placeholder="Descrie corectarea"></textarea>
