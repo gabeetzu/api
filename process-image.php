@@ -5,7 +5,7 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 });
 
 header('Content-Type: application/json; charset=utf-8');
-$allowedOrigins = ['https://gospodapp.netlify.app', 'https://gospodapp.ro'];
+$allowedOrigins = ['https://netlify.app', 'https://gospodapp.ro'];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (in_array($origin, $allowedOrigins)) {
     header('Access-Control-Allow-Origin: ' . $origin);
@@ -65,20 +65,46 @@ try {
     if ($imageBase64 && !preg_match('/^[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
         throw new Exception('Format imagine invalid.');
     }
-    $cnnDiagnosis = sanitizeInput($input['diagnosis'] ?? '');
-    $label = $cnnDiagnosis;
-    if (!$label || $label === 'unknown') {
-        $label = 'necunoscută';
-    }
+   $plantLabel = '';
+    $cnnConfidence = 0.0;
     $imageId = substr(sha1($imageBase64 ?: microtime()), 0, 8);
-    error_log("🌿 [CNN label] $label for image $imageId", 3, "/var/log/gospodapp.log");
+    
+    if ($imageBase64) {
+        $uploadDir = __DIR__ . '/uploads';
+        if (!file_exists($uploadDir)) {
+            mkdir($uploadDir, 0775, true);
+        }
+        $filename = 'img_' . $imageId . '.jpg';
+        $filePath = $uploadDir . '/' . $filename;
+        $data = preg_replace('#^data:image/\w+;base64,#i', '', $imageBase64);
+        file_put_contents($filePath, base64_decode($data));
 
-    $cnnConfidence = isset($input['confidence']) ? floatval($input['confidence']) : 1.0;
-    $cnnConfidence = max(0, min(1, $cnnConfidence));
-    $confidencePercent = round($cnnConfidence * 100);
+        $script = escapeshellarg(__DIR__ . '/api-PWAPP/cnn_yolo_infer.py');
+        $cmd = "python3 $script " . escapeshellarg($filePath);
+        $output = shell_exec($cmd);
+        $cnn = json_decode($output, true);
+        if (is_array($cnn) && isset($cnn['label'])) {
+            $plantLabel = sanitizeInput($cnn['label']);
+            $cnnConfidence = isset($cnn['confidence']) ? floatval($cnn['confidence']) : 0;
+        } else {
+            logEvent('YOLOFail', $output);
+        }
+    }
+
+    $cnnDiagnosis = $plantLabel;
+    $confidence = $cnnConfidence;
+    $label = $plantLabel ?: 'necunoscută';
+    error_log("🌿 [YOLO label] $label for image $imageId", 3, "/var/log/gospodapp.log");
+    $confidencePercent = round(max(0, min(1, $cnnConfidence)) * 100);
     $weather = sanitizeInput($input['weather'] ?? '');
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
     $refCode    = sanitizeInput($input['ref_code'] ?? '');
+    try {
+        $stmt = $pdo->prepare("INSERT INTO usage_log (device_hash, label, created_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$deviceHash, $plantLabel]);
+    } catch (Exception $e) {
+        // ignore logging failures
+    }
     $referralReward = false;
     $userName = sanitizeInput($input['user_name'] ?? '');
     if ($userName && !preg_match('/^[\p{L}\p{M} \'-]{2,30}$/u', $userName)) {
@@ -213,7 +239,7 @@ TEXT;
     if (!empty($weather)) {
         $userContent .= "\n\nCondiții meteo: $weather";
     }
-    $finalPrompt = "Imagine analizată: pare a fi o frunză afectată de: $label. Oferă sfaturi legate de această boală, chiar dacă e incertă. Rămâi pozitiv și empatic.";
+    $finalPrompt = "Imaginea pare să fie afectată de: $plantLabel (cu încredere $confidence). Oferă sfaturi legate de această boală, chiar dacă e incertă. Rămâi pozitiv și empatic.";
     $userContent = $finalPrompt . "\n\n" . $userContent;
     $currentUserMessage = ['role' => 'user', 'content' => $userContent];
 
