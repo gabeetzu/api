@@ -31,17 +31,23 @@ if ($expectedKey && !hash_equals($expectedKey, $apiKey)) {
 }
 
 $data = json_decode(file_get_contents('php://input'), true);
+$deviceHash = preg_replace('/[^a-zA-Z0-9_-]/', '', $data['device_hash'] ?? '');
 if (!$data || empty($data['original']) || empty($data['correction'])) {
     http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Missing fields']);
     exit();
 }
 
+$name = substr(strip_tags($data['user_name'] ?? ''), 0, 30);
+
 $entry = [
     'timestamp' => date('Y-m-d H:i:s'),
+    'device' => $data['device_hash'] ?? 'unknown',
+    'name' => $name,
     'original' => strip_tags($data['original']),
     'correction' => strip_tags($data['correction']),
-    'image' => $data['image'] ?? 'none'
+    'image' => $data['image'] ?? 'none',
+    'device_hash' => $deviceHash
 ];
 
 $logPath = "/data/corrections.csv";
