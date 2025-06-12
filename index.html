@@ -34,13 +34,13 @@
       <div class="menu-label">Meniu</div>
     </div>
   </header>
-  <nav id="side-menu" class="side-menu hidden">
-    <button id="settingsBtn">⚙️ Setări</button>
-    <button id="helpBtn">❓ Ajutor</button>
-    <button id="socialBtn">📣 Rețele sociale</button>
-    <button id="premiumBtn">💎 Premium</button>
-    <button id="inviteBtn">👥 Invită prieteni</button>
-    <button id="privacyBtn">🔒 Politica de confidențialitate</button>
+  <nav id="side-menu" class="side-menu">
+    <button id="settingsBtn" class="bubbly-btn">⚙️ Setări</button>
+    <button id="helpBtn" class="bubbly-btn">❓ Ajutor</button>
+    <button id="socialBtn" class="bubbly-btn">📣 Rețele sociale</button>
+    <button id="premiumBtn" class="bubbly-btn">💎 Premium</button>
+    <button id="inviteBtn" class="bubbly-btn">👥 Invită prieteni</button>
+    <button id="privacyBtn" class="bubbly-btn">🔒 Politica de confidențialitate</button>
   </nav>
   <div id="chatWindow" class="chat-container"></div>
   <div class="chat-input-bar">
@@ -49,33 +49,41 @@
       <input id="message-input" type="text" placeholder="Întreabă despre grădinărit…" />
       <button id="mic-btn" class="icon-btn"><img src="icons/microphone.svg" alt="mic"></button>
     </div>
-    <button id="send-btn" class="icon-btn send hidden"><img src="icons/send.svg" alt="send"></button>
+    <button id="send-btn" class="icon-btn send bubbly-btn hidden"><img src="icons/send.svg" alt="send"></button>
     <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
   </div>
   <div id="feedback-modal" class="modal hidden">
     <div class="modal-content">
       <textarea id="feedback-text" rows="4" placeholder="Descrie corectarea"></textarea>
-      <button id="send-feedback">Trimite</button>
+      <button id="send-feedback" class="bubbly-btn">Trimite</button>
     </div>
   </div>
-  <script src="main.js"></script>
+  
   <!-- Settings Modal -->
 <div id="settingsModal" class="modal hidden">
   <div class="modal-content">
     <h2>Setări</h2>
     <label>Dimensiune text:</label>
     <input type="range" id="fontSizeRange" min="0.8" max="1.8" step="0.1" value="1.0">
-    <button id="settingsCloseBtn">Închide</button>
+    <label>Tema</label>
+    <select id="themeSelect">
+      <option value="default">Clasică</option>
+      <option value="bubbly">Bubbly</option>
+    </select>
+    <button id="settingsCloseBtn" class="bubbly-btn">Închide</button>
   </div>
 </div>
 
 <!-- Help Modal -->
 <div id="helpModal" class="modal hidden">
-  <div class="modal-content">
-    <h2>Ajutor</h2>
-    <p>Scrie o întrebare sau încarcă o fotografie cu planta ta. Apasă 🎤 pentru dictare vocală. Folosește 📷 pentru galerie sau cameră.</p>
-    <button id="helpCloseBtn">Închide</button>
+    <div class="modal-content">
+      <h2>Ajutor</h2>
+      <p>Scrie o întrebare sau încarcă o fotografie cu planta ta. Apasă 🎤 pentru dictare vocală. Folosește 📷 pentru galerie sau cameră.</p>
+      <button id="helpCloseBtn" class="bubbly-btn">Închide</button>
+    </div>
   </div>
-</div>
+  <!-- Confetti for celebrations -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@latest/dist/confetti.browser.min.js"></script>
+  <script src="main.js"></script>
 </body>
 </html>
