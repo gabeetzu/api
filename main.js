@@ -63,7 +63,7 @@ const Trophies = {
       toast.textContent = '🏆 Trofeu deblocat: ' + this.get(id).text;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 4000);
-      celebrate();
+      congratulate();
     }
   },
   get(id) {
@@ -82,6 +82,12 @@ const Trophies = {
     }
   }
 };
+
+function congratulate() {
+  if (typeof confetti === 'function') {
+    confetti({ particleCount:120, spread:80, origin:{ y:0.6 } });
+  }
+}
 
 function celebrate() {
   confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
@@ -607,18 +613,24 @@ this.tips["12-31"] = "Încheie anul cu recunoștință pentru roadele grădinii.
 const tracker = new UsageTracker();
 const tips = new DailyTipProvider();
 
-const menuBtn      = document.getElementById('menu-btn');
-const sideMenu     = document.getElementById('side-menu');
-const chatWindow   = document.getElementById('chatWindow');
-const messageInput = document.getElementById('message-input');
-const sendBtn      = document.getElementById('send-btn');
-const cameraBtn    = document.getElementById('camera-btn');
-const micBtn       = document.getElementById('mic-btn');
-const fileInput    = document.getElementById('file-input');
+const menuBtn       = document.getElementById('menu-btn');
+const sideMenu      = document.getElementById('side-menu');
+const overlay       = document.getElementById('overlay');
+const closeMenuBtn  = document.getElementById('side-menu-close');
+const chatWindow    = document.getElementById('chatWindow');
+const messageInput  = document.getElementById('message-input');
+const sendBtn       = document.getElementById('send-btn');
+const cameraBtn     = document.getElementById('camera-btn');
+const micBtn        = document.getElementById('mic-btn');
+const fileInput     = document.getElementById('file-input');
 
-menuBtn.addEventListener('click', () => {
-  sideMenu.classList.toggle('show');
-});
+function toggleMenu(show){
+  sideMenu.classList.toggle('show', show);
+  overlay.classList.toggle('active', show);
+}
+menuBtn.addEventListener('click', () => toggleMenu(true));
+if(closeMenuBtn) closeMenuBtn.addEventListener('click', () => toggleMenu(false));
+overlay.addEventListener('click', () => toggleMenu(false));
 sendBtn.addEventListener('click', send);
 cameraBtn.addEventListener('click', () => fileInput.click());
 micBtn.addEventListener('click', startSpeechRecognition);
