@@ -1,5 +1,17 @@
 const APP_VERSION = '1.0.0';
 const BASE_URL = 'https://gabeetzu-project.onrender.com/';
+const settingsBtn     = document.getElementById('settingsBtn');
+const helpBtn         = document.getElementById('helpBtn');
+const socialBtn       = document.getElementById('socialBtn');
+const premiumBtn      = document.getElementById('premiumBtn');
+const inviteBtnMenu   = document.getElementById('inviteBtn');
+const privacyBtn      = document.getElementById('privacyBtn');
+const settingsModal   = document.getElementById('settingsModal');
+const helpModal       = document.getElementById('helpModal');
+const settingsCloseBtn= document.getElementById('settingsCloseBtn');
+const helpCloseBtn    = document.getElementById('helpCloseBtn');
+const fontSizeRange   = document.getElementById('fontSizeRange');
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js');
 }
@@ -584,6 +596,45 @@ menuBtn.addEventListener('click', () => {
 sendBtn.addEventListener('click', send);
 attachBtn.addEventListener('click', () => fileInput.click());
 micBtn.addEventListener('click', startSpeechRecognition);
+
+// — Settings modal —
+settingsBtn.addEventListener('click', () => {
+  settingsModal.classList.remove('hidden');
+});
+settingsCloseBtn.addEventListener('click', () => {
+  settingsModal.classList.add('hidden');
+});
+fontSizeRange.addEventListener('input', e => {
+  document.documentElement.style.setProperty('--chat-font-scale', e.target.value);
+  localStorage.setItem('fontScale', e.target.value);
+});
+
+// — Help modal —
+helpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
+helpCloseBtn.addEventListener('click', () => helpModal.classList.add('hidden'));
+
+// — Social links —
+socialBtn.addEventListener('click', () => {
+  window.open('https://facebook.com/yourpage', '_blank');
+});
+
+// — Premium flow —
+premiumBtn.addEventListener('click', () => {
+  alert('Pagina Premium urmează să fie implementată.');
+  // TODO: redirect to /premium or show purchase modal
+});
+
+// — Invite friends (same as existing shareReferral) —
+inviteBtnMenu.addEventListener('click', shareReferral);
+
+// — Privacy policy —
+privacyBtn.addEventListener('click', () => {
+  window.open('/politica-confidentialitate', '_blank');
+});
+
+const savedScale = parseFloat(localStorage.getItem('fontScale') || '1');
+document.documentElement.style.setProperty('--chat-font-scale', savedScale);
+fontSizeRange.value = savedScale;
 
 const tipDiv = document.getElementById('tip');
 tipDiv.textContent = tips.getTodaysTip();
