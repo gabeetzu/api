@@ -10,7 +10,9 @@
 <link rel="icon" href="icons/icon-192.png">
 <meta name="theme-color" content="#4CAF50">
 </head>
-<body class="chat-page">
+<body class="chat-page theme-bubbly">
+  <!-- NEW: greyed backdrop -->
+  <div id="overlay" class="overlay hidden"></div>
   <div id="gdpr-modal" class="modal hidden">
     <div class="modal-content">
       <p>Folosim date doar pentru a îmbunătăți răspunsurile. Vezi <a href="https://gospodapp.ro/politica-confidentialitate" target="_blank">politica de confidențialitate</a>.</p>
@@ -35,14 +37,17 @@
     </div>
   </header>
   <nav id="side-menu" class="side-menu">
-    <button id="settingsBtn" class="bubbly-btn">⚙️ Setări</button>
-    <button id="helpBtn" class="bubbly-btn">❓ Ajutor</button>
-    <button id="socialBtn" class="bubbly-btn">📣 Rețele sociale</button>
-    <button id="premiumBtn" class="bubbly-btn">💎 Premium</button>
-    <button id="inviteBtn" class="bubbly-btn">👥 Invită prieteni</button>
-    <button id="privacyBtn" class="bubbly-btn">🔒 Politica de confidențialitate</button>
-  </nav>
-  <div id="chatWindow" class="chat-container"></div>
+    <button id="side-menu-close" class="close-btn" aria-label="Închide meniu">×</button>
+    <button id="settingsBtn" class="bubbly-btn" aria-label="Setări">⚙️ Setări</button>
+    <button id="helpBtn" class="bubbly-btn" aria-label="Ajutor">❓ Ajutor</button>
+    <button id="socialBtn" class="bubbly-btn" aria-label="Rețele sociale">📣 Rețele sociale</button>
+    <button id="premiumBtn" class="bubbly-btn" aria-label="Premium">💎 Premium</button>
+    <button id="inviteBtn" class="bubbly-btn" aria-label="Invită prieteni">👥 Invită prieteni</button>
+    <button id="p rivacyBtn" class="bubbly-btn" aria-label="Politica de confidențialitate">🔒 Politica de confidențialitate</button>
+</nav>
+  <div class="chat-wrapper">
+    <div id="chatWindow" class="chat-container"></div>
+  </div>
   <div class="chat-input-bar">
     <button id="camera-btn" class="icon-btn"><img src="icons/camera.svg" alt="camera"></button>
     <div class="text-area-wrapper">
