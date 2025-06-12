@@ -581,21 +581,36 @@ this.tips["12-31"] = "Încheie anul cu recunoștință pentru roadele grădinii.
 const tracker = new UsageTracker();
 const tips = new DailyTipProvider();
 
-const menuBtn      = document.getElementById('menuBtn');
-const menuDropdown = document.getElementById('menuDropdown');
+const menuBtn      = document.getElementById('menu-btn');
+const sideMenu     = document.getElementById('side-menu');
 const chatWindow   = document.getElementById('chatWindow');
-const messageInput = document.getElementById('messageInput');
-const sendBtn      = document.getElementById('sendBtn');
-const attachBtn    = document.getElementById('attachBtn');
-const micBtn       = document.getElementById('micBtn');
-const fileInput    = document.querySelector('input[type="file"]'); // reuse existing
+const messageInput = document.getElementById('message-input');
+const sendBtn      = document.getElementById('send-btn');
+const cameraBtn    = document.getElementById('camera-btn');
+const micBtn       = document.getElementById('mic-btn');
+const fileInput    = document.getElementById('file-input');
 
 menuBtn.addEventListener('click', () => {
-  menuDropdown.classList.toggle('hidden');
+  sideMenu.classList.toggle('hidden');
+  sideMenu.classList.toggle('show');
 });
 sendBtn.addEventListener('click', send);
-attachBtn.addEventListener('click', () => fileInput.click());
+cameraBtn.addEventListener('click', () => fileInput.click());
 micBtn.addEventListener('click', startSpeechRecognition);
+messageInput.addEventListener('input', () => {
+  if (messageInput.value.trim()) {
+    micBtn.classList.add('hidden');
+    sendBtn.classList.remove('hidden');
+  } else {
+    micBtn.classList.remove('hidden');
+    sendBtn.classList.add('hidden');
+  }
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) {
+    send();
+  }
+});
 
 // — Settings modal —
 settingsBtn.addEventListener('click', () => {
@@ -664,8 +679,8 @@ function showWelcome(first){
     editNameBtn.classList.add('hidden');
   }
 }
-showWelcome();
-const imageInput = document.getElementById('image');
+showWelcome();␊
+const imageInput = fileInput;
 // sendBtn already defined above
 const shareBtn = document.getElementById('share-ref');
 const myRefDiv = document.getElementById('my-ref');
@@ -769,6 +784,7 @@ function startSpeechRecognition() {
   sr.lang = 'ro-RO';
   sr.onresult = e => {
     messageInput.value = e.results[0][0].transcript;
+    messageInput.dispatchEvent(new Event('input'));
   };
   sr.start();
 }
