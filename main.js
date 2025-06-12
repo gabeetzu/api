@@ -11,9 +11,30 @@ const helpModal       = document.getElementById('helpModal');
 const settingsCloseBtn= document.getElementById('settingsCloseBtn');
 const helpCloseBtn    = document.getElementById('helpCloseBtn');
 const fontSizeRange   = document.getElementById('fontSizeRange');
+const themeSelect     = document.getElementById('themeSelect');
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js');
+}
+
+// Theme and font-size persistence
+const theme = localStorage.getItem('theme') || 'default';
+if (theme === 'bubbly') document.body.classList.add('theme-bubbly');
+if(themeSelect) themeSelect.value = theme;
+if(themeSelect){
+  themeSelect.addEventListener('change', e => {
+    document.body.classList.toggle('theme-bubbly', e.target.value === 'bubbly');
+    localStorage.setItem('theme', e.target.value);
+  });
+}
+const fontRange = fontSizeRange;
+if(fontRange){
+  fontRange.value = localStorage.getItem('fontSize') || 1;
+  document.documentElement.style.fontSize = fontRange.value + 'rem';
+  fontRange.addEventListener('input', e => {
+    document.documentElement.style.fontSize = e.target.value + 'rem';
+    localStorage.setItem('fontSize', e.target.value);
+  });
 }
 
 let lastQuestion = '';
@@ -42,6 +63,7 @@ const Trophies = {
       toast.textContent = '🏆 Trofeu deblocat: ' + this.get(id).text;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 4000);
+      celebrate();
     }
   },
   get(id) {
@@ -60,6 +82,10 @@ const Trophies = {
     }
   }
 };
+
+function celebrate() {
+  confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+}
 
 function incStat(field){
   const stats = JSON.parse(localStorage.getItem('stats') || '{"q":0,"img":0}');
@@ -591,20 +617,15 @@ const micBtn       = document.getElementById('mic-btn');
 const fileInput    = document.getElementById('file-input');
 
 menuBtn.addEventListener('click', () => {
-  sideMenu.classList.toggle('hidden');
   sideMenu.classList.toggle('show');
 });
 sendBtn.addEventListener('click', send);
 cameraBtn.addEventListener('click', () => fileInput.click());
 micBtn.addEventListener('click', startSpeechRecognition);
 messageInput.addEventListener('input', () => {
-  if (messageInput.value.trim()) {
-    micBtn.classList.add('hidden');
-    sendBtn.classList.remove('hidden');
-  } else {
-    micBtn.classList.remove('hidden');
-    sendBtn.classList.add('hidden');
-  }
+  const hasText = messageInput.value.trim().length > 0;
+  micBtn.classList.toggle('hidden', hasText);
+  sendBtn.classList.toggle('hidden', !hasText);
 });
 fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) {
@@ -618,10 +639,6 @@ settingsBtn.addEventListener('click', () => {
 });
 settingsCloseBtn.addEventListener('click', () => {
   settingsModal.classList.add('hidden');
-});
-fontSizeRange.addEventListener('input', e => {
-  document.documentElement.style.setProperty('--chat-font-scale', e.target.value);
-  localStorage.setItem('fontScale', e.target.value);
 });
 
 // — Help modal —
@@ -646,10 +663,6 @@ inviteBtnMenu.addEventListener('click', shareReferral);
 privacyBtn.addEventListener('click', () => {
   window.open('/politica-confidentialitate', '_blank');
 });
-
-const savedScale = parseFloat(localStorage.getItem('fontScale') || '1');
-document.documentElement.style.setProperty('--chat-font-scale', savedScale);
-fontSizeRange.value = savedScale;
 
 const tipDiv = document.getElementById('tip');
 if (tipDiv) tipDiv.textContent = tips.getTodaysTip();
