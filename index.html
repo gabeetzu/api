@@ -10,50 +10,44 @@
 <link rel="icon" href="icons/icon-192.png">
 <meta name="theme-color" content="#4CAF50">
 </head>
-<body>
-<div id="gdpr-modal" class="modal hidden">
-  <div class="modal-content">
-    <p>Folosim date doar pentru a îmbunătăți răspunsurile. Vezi <a href="https://gospodapp.ro/politica-confidentialitate" target="_blank">politica de confidențialitate</a>.</p>
-    <button id="gdpr-accept">Accept</button>
+<body class="chat-page">
+  <div id="gdpr-modal" class="modal hidden">
+    <div class="modal-content">
+      <p>Folosim date doar pentru a îmbunătăți răspunsurile. Vezi <a href="https://gospodapp.ro/politica-confidentialitate" target="_blank">politica de confidențialitate</a>.</p>
+      <button id="gdpr-accept">Accept</button>
+    </div>
   </div>
-</div>
-<div id="profile-modal" class="modal hidden">
-  <div class="modal-content">
-    <p>Cum te cheamă?</p>
-    <input type="text" id="name-input" placeholder="ex. Bunica Floarea">
-    <button id="save-name">Salvează</button>
+  <div id="profile-modal" class="modal hidden">
+    <div class="modal-content">
+      <p>Cum te cheamă?</p>
+      <input type="text" id="name-input" placeholder="ex. Bunica Floarea">
+      <button id="save-name">Salvează</button>
+    </div>
   </div>
-</div>
-<main class="container">
-  <h1>GospodApp</h1>
-  <label><input type="checkbox" id="dark-mode-toggle"> Mod întunecat</label>
-  <label><input type="checkbox" id="toggle-tts" checked> Sunet activ</label>
-  <p id="tip"></p>
-  <div id="welcome-container">
-    <span id="welcome"></span>
-    <button id="edit-name" title="Schimbă numele">✏️</button>
-  </div>
-  <input type="text" id="question" placeholder="Scrie o întrebare despre grădină">
-  <label for="image" id="image-label">Încarcă imagine</label>
+  <header class="topbar">
+    <h1>GospodApp – Grădinărit fără bătăi de cap</h1>
+    <button id="menuBtn" class="menu-btn">⋮</button>
+    <nav id="menuDropdown" class="menu-dropdown hidden">
+      <button id="profileBtn">🪪 Profil</button>
+      <button id="myQuestionsBtn">🌱 Întrebările mele</button>
+      <button id="trophiesBtn">🏆 Trofee</button>
+      <button id="logoutBtn">🚪 Deconectare</button>
+    </nav>
+  </header>
+  <main id="chatWindow" class="chat-window"></main>
+  <footer class="input-bar">
+    <button id="attachBtn" class="icon-btn">📷</button>
+    <input id="messageInput" type="text" placeholder="Scrie o întrebare…" />
+    <button id="micBtn" class="icon-btn">🎤</button>
+    <button id="sendBtn" class="send-btn">Trimite</button>
+  </footer>
   <input type="file" id="image" accept="image/*" class="hidden">
-  <button id="send">Trimite</button>
-  <button id="share-ref">Invită un prieten</button>
-  <p id="my-ref"></p>
-  <button id="feedback-btn">Trimite corectare</button>
-  <button id="install" style="display:none">📲 Instalează aplicația</button>
-  <div id="counter"></div>
-  <div id="offline" class="hidden">Ești offline</div>
-  <div id="chat-box" class="chat-box"></div>
-    <h3>🎖️ Trofee câștigate:</h3>
-  <div id="trophies" style="padding: 1rem; background:#f9f9f9; border-radius: 1rem;"></div>
-  <div id="loading" class="hidden">Se încarcă...</div>
-</main>
-<div id="feedback-modal" class="modal hidden">
-  <div class="modal-content">
-    <textarea id="feedback-text" rows="4" placeholder="Descrie corectarea"></textarea>
-    <button id="send-feedback">Trimite</button>
+  <div id="feedback-modal" class="modal hidden">
+    <div class="modal-content">
+      <textarea id="feedback-text" rows="4" placeholder="Descrie corectarea"></textarea>
+      <button id="send-feedback">Trimite</button>
+    </div>
   </div>
-</div>
-<script src="main.js"></script>
+  <script src="main.js"></script>
 </body>
 </html>
