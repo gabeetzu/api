@@ -43,7 +43,9 @@ const Trophies = {
   render() {
     const unlocked = JSON.parse(localStorage.getItem('trophies') || '[]');
     const box = document.getElementById('trophies');
-    box.innerHTML = unlocked.map(id => '<div>' + this.get(id).text + '</div>').join('');
+    if(box){
+      box.innerHTML = unlocked.map(id => '<div>' + this.get(id).text + '</div>').join('');
+    }
   }
 };
 
@@ -567,6 +569,22 @@ this.tips["12-31"] = "Încheie anul cu recunoștință pentru roadele grădinii.
 const tracker = new UsageTracker();
 const tips = new DailyTipProvider();
 
+const menuBtn      = document.getElementById('menuBtn');
+const menuDropdown = document.getElementById('menuDropdown');
+const chatWindow   = document.getElementById('chatWindow');
+const messageInput = document.getElementById('messageInput');
+const sendBtn      = document.getElementById('sendBtn');
+const attachBtn    = document.getElementById('attachBtn');
+const micBtn       = document.getElementById('micBtn');
+const fileInput    = document.querySelector('input[type="file"]'); // reuse existing
+
+menuBtn.addEventListener('click', () => {
+  menuDropdown.classList.toggle('hidden');
+});
+sendBtn.addEventListener('click', send);
+attachBtn.addEventListener('click', () => fileInput.click());
+micBtn.addEventListener('click', startSpeechRecognition);
+
 const tipDiv = document.getElementById('tip');
 tipDiv.textContent = tips.getTodaysTip();
 const welcomeDiv = document.getElementById('welcome');
@@ -596,11 +614,8 @@ function showWelcome(first){
   }
 }
 showWelcome();
-
-const chat = document.getElementById('chat-box');
-const question = document.getElementById('question');
 const imageInput = document.getElementById('image');
-const sendBtn = document.getElementById('send');
+// sendBtn already defined above
 const shareBtn = document.getElementById('share-ref');
 const myRefDiv = document.getElementById('my-ref');
 const darkToggle = document.getElementById('dark-mode-toggle');
@@ -614,9 +629,10 @@ const usageDiv = document.getElementById('counter');
 const offlineDiv = document.getElementById('offline');
 const trophyList = document.getElementById('trophy-list');
 const trophiesDiv = document.getElementById('trophies');
-usageDiv.textContent = tracker.status();
+if(usageDiv) usageDiv.textContent = tracker.status();
 
 function displayReferral(){
+  if(!myRefDiv) return;
   const link = getReferralLink();
   myRefDiv.textContent = `Referralul tău: ${link}`;
   myRefDiv.addEventListener('click', ()=>{
@@ -626,49 +642,57 @@ function displayReferral(){
 }
 
 function updateOnlineStatus(){
-  offlineDiv.classList.toggle('hidden', navigator.onLine);
+  if(offlineDiv)
+    offlineDiv.classList.toggle('hidden', navigator.onLine);
 }
 window.addEventListener('online', updateOnlineStatus);
 window.addEventListener('offline', updateOnlineStatus);
 updateOnlineStatus();
 
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  const installBtn = document.getElementById('install');
-  installBtn.style.display = 'inline-block';
-});
+if(installBtn){
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.style.display = 'inline-block';
+  });
 
-document.getElementById('install').addEventListener('click', () => {
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    deferredPrompt.userChoice.then(() => {
-      deferredPrompt = null;
-    });
-  }
-});
+  installBtn.addEventListener('click', () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => {
+        deferredPrompt = null;
+      });
+    }
+  });
+}
 
 window.addEventListener('offline', () => {
   alert('⚠️ Ești offline. Aplicația va funcționa doar cu fișierele cache.');
 });
 
-darkToggle.checked = localStorage.getItem('dark') === 'true';
-if (darkToggle.checked) {
-  document.body.classList.add('dark');
+if(darkToggle){
+  darkToggle.checked = localStorage.getItem('dark') === 'true';
+  if (darkToggle.checked) {
+    document.body.classList.add('dark');
+  }
+  darkToggle.addEventListener('change', () => {
+    const enabled = darkToggle.checked;
+    document.body.classList.toggle('dark', enabled);
+    localStorage.setItem('dark', enabled);
+  });
 }
-darkToggle.addEventListener('change', () => {
-  const enabled = darkToggle.checked;
-  document.body.classList.toggle('dark', enabled);
-  localStorage.setItem('dark', enabled);
-});
-ttsToggle.checked = localStorage.getItem('tts') !== 'false';
-ttsToggle.addEventListener('change', () => {
-  localStorage.setItem('tts', ttsToggle.checked);
-});
+if(ttsToggle){
+  ttsToggle.checked = localStorage.getItem('tts') !== 'false';
+  ttsToggle.addEventListener('change', () => {
+    localStorage.setItem('tts', ttsToggle.checked);
+  });
+}
 logUsage('open');
 
 function speak(text) {
-  if (!document.getElementById('toggle-tts').checked) return;
+  const tts = document.getElementById('toggle-tts');
+  if (tts && !tts.checked) return;
+  if (!tts) return;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'ro-RO';
   utter.rate = 0.9;
@@ -679,8 +703,8 @@ function showTyping() {
   const typing = document.createElement('div');
   typing.id = 'typing';
   typing.textContent = 'GPT scrie...';
-  typing.className = 'message bot';
-  chat.appendChild(typing);
+  typing.className = 'message bot';␊
+  chatWindow.appendChild(typing);
 }
 
 function hideTyping() {
@@ -688,19 +712,26 @@ function hideTyping() {
   if (el) el.remove();
 }
 
+function startSpeechRecognition() {
+  if (!window.webkitSpeechRecognition) return alert('Browserul nu suportă speech-to-text');
+  const sr = new webkitSpeechRecognition();
+  sr.lang = 'ro-RO';
+  sr.onresult = e => {
+    messageInput.value = e.results[0][0].transcript;
+  };
+  sr.start();
+}
+
 function addMessage(text, user) {
   const div = document.createElement('div');
   div.className = 'message ' + (user ? 'user' : 'bot');
   div.textContent = text;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-  if(!user){
-    speak(text);
-  }
+  chatWindow.appendChild(div);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
 async function send() {
-  const text = question.value.trim();
+   const text = messageInput.value.trim();
   const file = imageInput.files[0];
   if(!text && !file) return;
   if(text && !tracker.canMakeTextAPICall()) {
@@ -745,7 +776,8 @@ async function send() {
      const data = await resp.json();
     hideTyping();
     if(data.success){
-      addMessage(data.response, false);
+      const text = data.response?.text ?? data.response?.message ?? 'Eroare răspuns';
+      addMessage(text, false);
       if(text){
         tracker.recordTextAPICall();
         incStat('q');
@@ -842,8 +874,6 @@ feedbackBtn.addEventListener('click', () => {
   feedbackModal.classList.remove('hidden');
 });
 sendFeedbackBtn.addEventListener('click', sendFeedback);
-
-sendBtn.addEventListener('click', send);
 
 // GDPR modal
 const modal = document.getElementById('gdpr-modal');
