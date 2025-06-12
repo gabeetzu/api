@@ -218,3 +218,20 @@ body.chat-page {
   background:#25d366; color:#fff; border:none;
   padding:.8rem 1.2rem; border-radius:20px; font-size:1rem;
 }
+/* Shared modal styling */
+.modal {
+  position: fixed;
+  top: 0; left: 0; right:0; bottom:0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items:center; justify-content:center;
+  z-index: 1000;
+}
+.modal.hidden { display: none; }
+.modal .modal-content {
+  background: #fff; padding: 1.5rem; border-radius:8px;
+  max-width: 90%; width: 320px; text-align:left;
+}
+
+/* Settings sliders/buttons */
+#settingsModal input[type=range] { width:100%; margin:1rem 0; }
+#settingsModal button { margin-top: 1rem; }
