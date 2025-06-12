@@ -53,4 +53,10 @@ $pdo = new PDO(
 $stmt = $pdo->prepare("UPDATE usage_tracking SET pending_deletion = 1, deletion_due_at = NOW() + INTERVAL 7 DAY WHERE device_hash = ?");
 $stmt->execute([$deviceHash]);
 
-echo json_encode(['success' => true, 'message' => 'Deletion scheduled']);
+echo json_encode([
+    'success'  => true,
+    'response' => [
+        'text' => 'Deletion scheduled',
+        'raw'  => 'Deletion scheduled'
+    ]
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
