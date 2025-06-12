@@ -1,98 +1,174 @@
 <!DOCTYPE html>
 <html lang="ro">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GospodApp - Grădinărit Fără Bătăi de Cap!</title>
-<meta name="description" content="Diagnostichează boli ale plantelor, primește sfaturi ecologice și învață să grădinărești mai bine.">
-<link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="style.css">
-<link rel="icon" href="icons/icon-192.png">
-<meta name="theme-color" content="#4CAF50">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, maximum-scale=5.0">
+    <meta name="theme-color" content="#4CAF50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="description" content="Asistent prietenos pentru grădinărit cu AI">
+    
+    <title>GospodApp - Asistent pentru Grădinărit</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+    
+    <style>
+        /* Critical CSS for immediate rendering */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html, body {
+            width: 100%;
+            overflow-x: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-size: 18px;
+            color: #4CAF50;
+        }
+        
+        .app-content {
+            display: none;
+        }
+        
+        .app-content.loaded {
+            display: block;
+        }
+    </style>
 </head>
-<body class="chat-page theme-bubbly">
-  <!-- NEW: greyed backdrop -->
-  <div id="overlay" class="overlay hidden"></div>
-  <div id="gdpr-modal" class="modal hidden">
-    <div class="modal-content">
-      <p>Folosim date doar pentru a îmbunătăți răspunsurile. Vezi <a href="https://gospodapp.ro/politica-confidentialitate" target="_blank">politica de confidențialitate</a>.</p>
-      <button id="gdpr-accept">Accept</button>
+<body>
+    <div id="app">
+        <div class="loading">
+            <span>Se încarcă GospodApp...</span>
+        </div>
+        
+        <div class="app-content">
+            <!-- Header -->
+            <header class="header">
+                <div class="container">
+                    <div class="header-content">
+                        <div class="logo">
+                            <h1>🌱 GospodApp</h1>
+                        </div>
+                        
+                        <nav class="nav">
+                            <ul class="nav-menu" id="nav-menu">
+                                <li><a href="#home" class="nav-link">Acasă</a></li>
+                                <li><a href="#about" class="nav-link">Despre</a></li>
+                                <li><a href="#help" class="nav-link">Ajutor</a></li>
+                            </ul>
+                            
+                            <button class="nav-toggle" id="nav-toggle" aria-label="Deschide meniul">
+                                <span class="hamburger-line"></span>
+                                <span class="hamburger-line"></span>
+                                <span class="hamburger-line"></span>
+                            </button>
+                        </nav>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Main Content -->
+            <main class="main">
+                <div class="container">
+                    <!-- Welcome Section -->
+                    <section class="welcome" id="welcome-section">
+                        <div class="welcome-content">
+                            <h2>Bun venit la GospodApp!</h2>
+                            <p>Asistentul tău inteligent pentru grădinărit cu AI</p>
+                            
+                            <div class="name-input-section">
+                                <label for="user-name">Cum te cheamă?</label>
+                                <input type="text" id="user-name" placeholder="Introdu numele tău...">
+                                <button id="save-name">Salvează</button>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Chat Interface -->
+                    <section class="chat-section" id="chat-section" style="display: none;">
+                        <div class="chat-container">
+                            <div class="chat-messages" id="chat-messages">
+                                <!-- Messages will be dynamically added here -->
+                            </div>
+                            
+                            <div class="chat-input-container">
+                                <div class="input-section">
+                                    <input type="file" id="image-input" accept="image/*" style="display: none;">
+                                    <button id="image-btn" class="input-btn">📷</button>
+                                    <input type="text" id="text-input" placeholder="Întreabă ceva despre plante...">
+                                    <button id="send-btn" class="input-btn">📤</button>
+                                </div>
+                                
+                                <div class="usage-info">
+                                    <span id="usage-counter">Utilizări: 0/30</span>
+                                    <span id="premium-status"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Stats & Trophies -->
+                    <section class="stats-section">
+                        <div class="stats-container">
+                            <div class="trophies-box">
+                                <h3>🏆 Trofeele tale</h3>
+                                <div id="trophies" class="trophies-list">
+                                    <!-- Trophies will be dynamically added -->
+                                </div>
+                            </div>
+                            
+                            <div class="referral-box">
+                                <h3>🔗 Invită prieteni</h3>
+                                <p>Codul tău de referință:</p>
+                                <div class="referral-code">
+                                    <span id="ref-code"></span>
+                                    <button id="copy-ref">Copiază</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+            
+            <!-- Footer -->
+            <footer class="footer">
+                <div class="container">
+                    <p>&copy; 2024 GospodApp. Asistent pentru grădinărit cu AI.</p>
+                    <p><a href="#privacy">Politica de confidențialitate</a></p>
+                </div>
+            </footer>
+        </div>
     </div>
-  </div>
-  <div id="profile-modal" class="modal hidden">
-    <div class="modal-content">
-      <p>Cum te cheamă?</p>
-      <input type="text" id="name-input" placeholder="ex. Bunica Floarea">
-      <button id="save-name">Salvează</button>
-    </div>
-  </div>
-  <header class="app-header">
-    <img src="icons/icon-48.png" class="logo" alt="GospodApp logo">
-    <h1 class="title">GospodApp – Grădinărit fără bătăi de cap</h1>
-    <div class="menu-wrapper">
-      <button id="menu-btn" aria-label="Meniu">
-        <span class="burger"></span>
-      </button>
-      <div class="menu-label">Meniu</div>
-    </div>
-  </header>
-  <nav id="side-menu" class="side-menu">
-    <button id="side-menu-close" class="close-btn" aria-label="Închide meniu">×</button>
-    <button id="settingsBtn" class="bubbly-btn" aria-label="Setări">⚙️ Setări</button>
-    <button id="helpBtn" class="bubbly-btn" aria-label="Ajutor">❓ Ajutor</button>
-    <button id="socialBtn" class="bubbly-btn" aria-label="Rețele sociale">📣 Rețele sociale</button>
-    <button id="premiumBtn" class="bubbly-btn" aria-label="Premium">💎 Premium</button>
-    <button id="inviteBtn" class="bubbly-btn" aria-label="Invită prieteni">👥 Invită prieteni</button>
-    <button id="p rivacyBtn" class="bubbly-btn" aria-label="Politica de confidențialitate">🔒 Politica de confidențialitate</button>
-</nav>
-  <div class="chat-wrapper">
-    <div id="chatWindow" class="chat-container"></div>
-  </div>
-  <div class="chat-input-bar">
-    <button id="camera-btn" class="icon-btn"><img src="icons/camera.svg" alt="camera"></button>
-    <div class="text-area-wrapper">
-      <input id="message-input" type="text" placeholder="Întreabă despre grădinărit…" />
-      <button id="mic-btn" class="icon-btn"><img src="icons/microphone.svg" alt="mic"></button>
-    </div>
-    <button id="send-btn" class="icon-btn send bubbly-btn hidden"><img src="icons/send.svg" alt="send"></button>
-    <input id="file-input" type="file" accept="image/*" capture="environment" hidden>
-  </div>
-  <div id="feedback-modal" class="modal hidden">
-    <div class="modal-content">
-      <textarea id="feedback-text" rows="4" placeholder="Descrie corectarea"></textarea>
-      <button id="send-feedback" class="bubbly-btn">Trimite</button>
-    </div>
-  </div>
-  
-  <!-- Settings Modal -->
-<div id="settingsModal" class="modal hidden">
-  <div class="modal-content">
-    <h2>Setări</h2>
-    <label>Dimensiune text:</label>
-    <input type="range" id="fontSizeRange" min="0.8" max="1.8" step="0.1" value="1.0">
-    <label>Tema</label>
-    <select id="themeSelect">
-      <option value="default">Clasică</option>
-      <option value="bubbly">Bubbly</option>
-    </select>
-    <button id="settingsCloseBtn" class="bubbly-btn">Închide</button>
-  </div>
-</div>
-
-<!-- Help Modal -->
-<div id="helpModal" class="modal hidden">
-    <div class="modal-content">
-      <h2>Ajutor</h2>
-      <p>Scrie o întrebare sau încarcă o fotografie cu planta ta. Apasă 🎤 pentru dictare vocală. Folosește 📷 pentru galerie sau cameră.</p>
-      <button id="helpCloseBtn" class="bubbly-btn">Închide</button>
-    </div>
-  </div>
-  <!-- Confetti for celebrations -->
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@latest/dist/confetti.browser.min.js"></script>
-  <script src="main.js"></script>
-  <!-- stub daily tips -->
-  <script type="application/json" id="daily-tip">
-    { "message": "🌱 Udă moderat dimineața devreme pentru o creștere sănătoasă a florilor!" }
-  </script>
+    
+    <!-- Toast container for notifications -->
+    <div id="toast-container"></div>
+    
+    <!-- Modal container -->
+    <div id="modal-container"></div>
+    
+    <script>
+        // Critical loading script
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                document.querySelector('.loading').style.display = 'none';
+                document.querySelector('.app-content').classList.add('loaded');
+            }, 500);
+        });
+    </script>
+    
+    <script src="main.js"></script>
 </body>
 </html>
