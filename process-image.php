@@ -738,11 +738,13 @@ function executeCNNAnalysis($imagePath) {
     
     // Execute with proper error capture
     $command = sprintf(
-    '/opt/venv/bin/python3 %s %s 2>&1',
-    escapeshellarg($pythonScript),
-    escapeshellarg($imagePath)
+        '/opt/venv/bin/python3 %s %s 2>&1',
+        escapeshellarg($pythonScript),
+        escapeshellarg($imagePath)
     );
 
+    error_log("CNN Command: $command");
+    
     // Verify Python virtual environment exists
     if (!file_exists('/opt/venv/bin/python3')) {
     throw new Exception("Python virtual environment not found");
@@ -757,7 +759,7 @@ function executeCNNAnalysis($imagePath) {
     
     error_log("Executing CNN command: $command");
     $output = shell_exec($command);
-     error_log("CNN output: $output");
+    error_log("CNN output: $output");
     
     if (empty($output)) {
         throw new Exception("CNN script produced no output");
@@ -767,6 +769,9 @@ function executeCNNAnalysis($imagePath) {
     $result = json_decode($output, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
         throw new Exception("CNN script returned invalid JSON: $output");
+    }
+    if (isset($result['error'])) {
+        throw new Exception('CNN error: ' . $result['error']);
     }
     
     return $result;
