@@ -10,6 +10,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
+$rawString = $_SERVER['QUERY_STRING'] ?? '';
+require_once 'security.php';
+
 require_once 'DatabaseManager.php';
 
 try {
@@ -20,6 +23,15 @@ try {
     
     // Get device hash from query parameters
     $deviceHash = $_GET['hash'] ?? '';
+
+     if (!validateRequestSignature($rawString)) {
+        $db = DatabaseManager::getInstance();
+        $pdo = $db->getConnection();
+        logSecurityEvent($pdo, $deviceHash ?: 'unknown', 'bypass_attempt');
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Invalid signature']);
+        exit();
+    }
     
     // Validate device hash
     if (empty($deviceHash) || !preg_match('/^[a-zA-Z0-9_]{8,64}$/', $deviceHash)) {
