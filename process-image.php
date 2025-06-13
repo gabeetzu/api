@@ -1,4 +1,10 @@
 <?php
+// Add this to the top of process-image.php for debugging
+error_log("DB Host: " . getenv('DATABASE_HOST'));
+error_log("DB Name: " . getenv('DATABASE_NAME'));
+error_log("DB User: " . getenv('DATABASE_USER'));
+error_log("DB Pass: " . substr(getenv('DATABASE_PASS'), 0, 3) . '***');
+
 set_error_handler(function ($errno, $errstr, $errfile, $errline) {
     $log = "[" . date('Y-m-d H:i:s') . "] PHP ERROR: $errstr in $errfile on line $errline\n";
     file_put_contents('/var/data/logs/errors.csv', $log, FILE_APPEND);
