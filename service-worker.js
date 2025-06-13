@@ -5,7 +5,7 @@ const CACHE_ASSETS = [
   '/',
   '/index.html',
   '/main.js',
-  '/styles.css',
+  '/style.css',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
