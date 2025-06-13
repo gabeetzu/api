@@ -1,5 +1,24 @@
 <?php
 
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/error.log');   // central log
+error_reporting(E_ALL);
+
+// wrap everything so nothing leaks HTML
+function panic($msg, $context = []) {
+    error_log("[PANIC] $msg | " . json_encode($context));
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success'   => false,
+        'response'  => null,
+        'error'     => $msg,
+        'timestamp' => date('Y-m-d H:i:s')
+    ]);
+    exit;
+}
+
 // Security headers
 header("Content-Security-Policy: default-src 'self'");
 header("X-Content-Type-Options: nosniff");
@@ -28,11 +47,6 @@ ini_set('max_execution_time', 60);
 ini_set('upload_max_filesize', '10M');
 ini_set('post_max_size', '10M');
 
-ini_set('display_errors', 0); // Don't display to user
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/error.log');
-error_reporting(E_ALL);
-
 ini_set('pcre.jit', '0'); // Disable JIT for stability
 ini_set('opcache.enable', '1'); // Enable OpCache
 
@@ -45,13 +59,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Read raw body early for signature validation
 $rawBody = file_get_contents('php://input');
 
+
 require_once __DIR__ . '/security.php';
+
+if (isset($_GET['ping'])) {
+    echo json_encode(['pong' => true, 'time' => time()]);
+    exit;
+}
 
 try {
     $requiredVars = ['DATABASE_HOST', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD'];
     foreach ($requiredVars as $var) {
         if (empty(getenv($var))) {
-            throw new Exception("Missing required environment variable: $var");
+            panic("Missing required environment variable: $var", ["line" => __LINE__]);
         }
     }
 
@@ -65,14 +85,7 @@ try {
         ]
     );
 } catch (Exception $e) {
-    error_log("Error: " . $e->getMessage());
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'error' => 'Internal server error',
-        'timestamp' => date('Y-m-d H:i:s')
-    ]);
-    exit();
+    panic($e->getMessage(), ['line' => __LINE__]);
 }
 
 // Validate critical environment variables
@@ -118,10 +131,10 @@ try {
     $imageBase64 = $input['image'] ?? '';
         // Limit uploaded images to 3MB to keep requests lightweight
     if ($imageBase64 && strlen($imageBase64) > 3 * 1024 * 1024) {
-        throw new Exception('Imaginea depășește 3MB.');
+        panic('Imaginea depășește 3MB.', ["line" => __LINE__]);
     }
     if ($imageBase64 && !preg_match('/^data:image\/(jpeg|png);base64,[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
-    throw new Exception('Format imagine invalid. Acceptă doar JPEG sau PNG.');
+    panic('Format imagine invalid. Acceptă doar JPEG sau PNG.', ["line" => __LINE__]);
     }
    $plantLabel = '';
     $cnnConfidence = 0.0;
@@ -161,11 +174,11 @@ try {
     $referralReward = false;
     $userName = sanitizeInput($input['user_name'] ?? '');
     if ($userName && !preg_match('/^[\p{L}\p{M} \'-]{2,30}$/u', $userName)) {
-        throw new Exception('Nume invalid');
+        panic('Nume invalid', ["line" => __LINE__]);
     }
 
     if (empty($userMessage) && empty($imageBase64) && empty($cnnDiagnosis)) {
-        throw new Exception('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.');
+        panic('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.', ["line" => __LINE__]);
     }
     
     $isPremiumRequest = filter_var($input['is_premium'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -334,7 +347,7 @@ TEXT;
     saveChatMessage($pdo, $deviceHash, $responseText, false);
 
     if (empty($responseText)) {
-        throw new Exception('Răspuns gol de la AI');
+        panic('Răspuns gol de la AI', ["line" => __LINE__]);
     }
 
     $formattedText = formatResponse($responseText);
@@ -414,7 +427,7 @@ function formatFeaturesText(array $features) {
 function getGPTResponse(array $messages, $retries = 2) {
     $apiKey = getenv('OPENAI_API_KEY');
     if (empty($apiKey)) {
-        throw new Exception('OpenAI API key not configured');
+        panic('OpenAI API key not configured', ["line" => __LINE__]);
     }
 
     $attempt = 0;
@@ -445,7 +458,7 @@ function getGPTResponse(array $messages, $retries = 2) {
         curl_close($ch);
         
         if ($curlError) {
-            throw new Exception('cURL error: ' . $curlError);
+            panic('cURL error: ' . $curlError, ["line" => __LINE__]);
         }
 
         if ($httpCode === 200 && $res) {
@@ -454,13 +467,13 @@ function getGPTResponse(array $messages, $retries = 2) {
                 return formatResponse($data['choices'][0]['message']['content']);
             }
             } elseif ($httpCode !== 200) {
-            throw new Exception('OpenAI API error: HTTP ' . $httpCode);
+            panic('OpenAI API error: HTTP ' . $httpCode, ["line" => __LINE__]);
         }
         
         sleep(1);
     } while ($attempt <= $retries);
     
-    throw new Exception('OpenAI API indisponibil.');
+    panic('OpenAI API indisponibil.', ["line" => __LINE__]);
 }
 
 function formatResponse($text) {
@@ -525,7 +538,7 @@ function sanitizeInput($text) {
 
 function validateDeviceHash($hash) {
     if (!preg_match('/^[a-zA-Z0-9_-]{8,64}$/', $hash)) {
-        throw new Exception('ID dispozitiv invalid');
+        panic('ID dispozitiv invalid', ["line" => __LINE__]);
     }
 }
 
@@ -535,7 +548,7 @@ function trackUsage($deviceHash, $type) {
 
     $allowedTypes = ['text' => 'text_count', 'image' => 'image_count'];
         if (!isset($allowedTypes[$type])) {
-            throw new Exception("Invalid usage type: $type");
+            panic("Invalid usage type: $type", ["line" => __LINE__]);
         }
 
     $field = $allowedTypes[$type];
@@ -597,7 +610,7 @@ function getDatabaseConnection() {
             
         } catch (PDOException $e) {
             error_log("Database connection failed: " . $e->getMessage());
-            throw new Exception("Database connection failed: Check credentials and network access");
+            panic("Database connection failed: Check credentials and network access", ["line" => __LINE__]);
         }
     }
     
@@ -656,11 +669,11 @@ function ensureUploadDirectory() {
     $uploadDir = __DIR__ . '/uploads';
     if (!is_dir($uploadDir)) {
         if (!mkdir($uploadDir, 0755, true)) {
-            throw new Exception('Cannot create upload directory');
+            panic('Cannot create upload directory', ["line" => __LINE__]);
         }
     }
     if (!is_writable($uploadDir) && !chmod($uploadDir, 0755)) {
-        throw new Exception('Upload directory not writable');
+        panic('Upload directory not writable', ["line" => __LINE__]);
     }
     return $uploadDir;
 }
@@ -669,7 +682,7 @@ function processImageUpload($base64 = null) {
     $maxSize = 3 * 1024 * 1024; // 3MB
     
     if ($base64 && strlen($base64) > $maxSize) {
-        throw new Exception("Imaginea depășește 3MB");
+        panic("Imaginea depășește 3MB", ["line" => __LINE__]);
     }
 
     $uploadDir = __DIR__ . '/uploads';
@@ -683,20 +696,20 @@ function processImageUpload($base64 = null) {
     if ($base64) {
         $data = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64));
         if (file_put_contents($tempFile, $data) === false) {
-            throw new Exception("Eroare la salvarea temporară a imaginii");
+            panic("Eroare la salvarea temporară a imaginii", ["line" => __LINE__]);
         }
     }
 
     $imageInfo = getimagesize($tempFile);
     if (!$imageInfo) {
         unlink($tempFile);
-        throw new Exception("Format imagine invalid");
+        panic("Format imagine invalid", ["line" => __LINE__]);
     }
 
     $ext = match($imageInfo[2]) {
         IMAGETYPE_JPEG => 'jpg',
         IMAGETYPE_PNG => 'png',
-        default => throw new Exception("Format neacceptat. Folosește JPEG sau PNG")
+        default => panic("Format neacceptat. Folosește JPEG sau PNG", ["line" => __LINE__])
     };
 
     $filename = 'img_' . uniqid() . '.' . $ext;
@@ -704,7 +717,7 @@ function processImageUpload($base64 = null) {
 
     if (!rename($tempFile, $filePath)) {
         unlink($tempFile);
-        throw new Exception("Eroare la salvarea imaginii");
+        panic("Eroare la salvarea imaginii", ["line" => __LINE__]);
     }
 
     return $filePath;
@@ -714,7 +727,7 @@ function executeCNNAnalysis($imagePath) {
     $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
     
     if (!file_exists($pythonScript)) {
-        throw new Exception("CNN script not found at: $pythonScript");
+        panic("CNN script not found at: $pythonScript", ["line" => __LINE__]);
     }
 
     $modelPath = __DIR__ . '/best.pt';
@@ -722,32 +735,20 @@ function executeCNNAnalysis($imagePath) {
         throw new Exception("CNN model file not found at: $modelPath");
     }
 
-    $command = '/opt/venv/bin/python3 ' .
-               escapeshellarg($pythonScript) . ' ' .
-               escapeshellarg($imagePath) . ' 2>&1';
+    $cmd = '/opt/venv/bin/python3 ' . escapeshellarg(__DIR__.'/cnn_yolo_infer.py')
+           .' '.escapeshellarg($imagePath).' 2>&1';
 
-    exec($command, $output, $return_code);
-    $pythonOutput = implode("\n", $output);
+    exec($cmd, $pyOut, $code);
+    $errorBlob = implode("\n", $pyOut);
+    error_log("[PYTHON] exit=$code\n$errorBlob");
 
-    error_log("Python Command: " . $command);
-    error_log("Python Exit Code: " . $return_code);
-    error_log("Python Output: " . $pythonOutput);
-
-    if ($return_code !== 0) {
-        throw new Exception("CNN analysis failed: " . $pythonOutput);
+    if ($code !== 0) {
+        panic('CNN script failed', ['exit' => $code]);
     }
-    
-    error_log("Executing CNN command: $command");
-    $output = shell_exec($command);
-    error_log("CNN output: $output");
-    
-    if (empty($output)) {
-        throw new Exception("CNN script produced no output");
-    }
-    
-    $result = json_decode($pythonOutput, true);
+
+    $result = json_decode($errorBlob, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception("Invalid JSON from Python: " . $pythonOutput);
+        panic('Bad JSON from CNN', ['raw' => $errorBlob]);
     }
     
     return $result;
@@ -827,7 +828,7 @@ function validateEnvironment() {
     $required = ['OPENAI_API_KEY', 'DATABASE_HOST', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD'];
     foreach ($required as $var) {
         if (empty($_ENV[$var]) && empty(getenv($var))) {
-            throw new Exception("Missing required environment variable: $var");
+            panic("Missing required environment variable: $var", ["line" => __LINE__]);
         }
     }
 }
