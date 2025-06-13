@@ -66,21 +66,24 @@
                         </div>
                         
                         <nav class="nav">
-                            <ul class="nav-menu" id="nav-menu">
-                                <li><a href="#home" class="nav-link">Acasă</a></li>
-                                <li><a href="#about" class="nav-link">Despre</a></li>
-                                <li><a href="#help" class="nav-link">Ajutor</a></li>
-                            </ul>
-                            
-                            <button class="nav-toggle" id="nav-toggle" aria-label="Deschide meniul" type="button">
-                                <span class="hamburger-line"></span>
-                                <span class="hamburger-line"></span>
-                                <span class="hamburger-line"></span>
-                            </button>
+                            <button class="nav-toggle" id="nav-toggle" aria-label="Deschide meniul" type="button">☰</button>
                         </nav>
                     </div>
                 </div>
             </header>
+
+            <!-- Slide-in Menu -->
+            <aside id="side-menu" class="side-menu">
+                <ul class="menu-items">
+                    <li><button class="menu-item" data-action="settings">Setări</button></li>
+                    <li><button class="menu-item" data-action="help">Ajutor</button></li>
+                    <li><button class="menu-item" data-action="social">Rețele Sociale</button></li>
+                    <li><button class="menu-item" data-action="premium">Premium</button></li>
+                    <li><button class="menu-item" data-action="invite">Invită prieteni</button></li>
+                    <li><button class="menu-item" data-action="privacy">Politica de confidențialitate</button></li>
+                </ul>
+            </aside>
+            <div id="menu-overlay"></div>
             
             <!-- Main Content -->
             <main class="main">
@@ -111,7 +114,7 @@
                                     <input type="file" id="image-input" accept="image/*" style="display: none;">
                                     <button id="image-btn" class="input-btn" type="button" aria-label="Atașează fișier">📎</button>
                                     <textarea id="text-input" placeholder="Scrie un mesaj..." autocomplete="off" rows="1"></textarea>
-                                    <button id="send-btn" class="input-btn" type="button" aria-label="Trimite mesaj"><span id="send-icon">🎤</span></button>
+                                    <button id="send-btn" class="input-btn" type="button" aria-label="Trimite mesaj"><img id="send-icon" src="icons/microphone.svg" alt="microphone" width="24" height="24"></button>
                                 </div>
                                 
                                 <div class="usage-info">
