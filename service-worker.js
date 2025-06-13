@@ -1,44 +1,24 @@
-// service-worker.js - Fixed version
-const CACHE_NAME = 'gospod-app-v5';
-const CACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/main.js',
-  '/styles.css'
-  // Remove non-existent assets that cause cache failures
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        // Add assets individually to avoid failures
-        return Promise.all(
-          CACHE_ASSETS.map(asset => 
-            cache.add(asset).catch(err => 
-              console.warn(`Failed to cache ${asset}:`, err)
-            )
-          )
-        );
-      })
-      .then(() => self.skipWaiting())
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open('gospod-v6').then(async cache => {
+      for (const asset of ['/', '/index.html','/main.js','/styles.css']) {
+        try { await cache.add(asset); }
+        catch(err){ console.warn('Skip cache', asset, err); }
+      }
+    }).then(()=>self.skipWaiting())
   );
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then(keys => 
-      Promise.all(
-        keys.map(key => key !== CACHE_NAME ? caches.delete(key) : null)
-      )
-    ).then(() => clients.claim())
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.map(k => k !== 'gospod-v6' ? caches.delete(k) : null))
+    ).then(()=>clients.claim())
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then(cached => cached || fetch(event.request))
-      .catch(() => caches.match('/'))
+self.addEventListener('fetch', e => {
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request))
   );
 });
