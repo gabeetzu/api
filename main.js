@@ -10,6 +10,13 @@ let isProcessing = false;
 let recognition = null;
 let isRecording = false;
 
+window.addEventListener('offline', () => {
+    showToast('E\u0219ti offline. Conexiunea a fost pierdut\u0103.', 'error');
+});
+window.addEventListener('online', () => {
+    showToast('Conexiune restabilit\u0103.', 'success');
+});
+
 // Basic analytics logger
 const Analytics = {
     logEvent(event, data = {}) {
