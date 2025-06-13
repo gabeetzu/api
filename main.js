@@ -7,6 +7,8 @@ let lastQuestion = '';
 let lastImage = null;
 let deferredPrompt = null;
 let isProcessing = false;
+let recognition = null;
+let isRecording = false;
 
 // Register service worker for PWA functionality
 if ('serviceWorker' in navigator) {
@@ -357,13 +359,60 @@ function autoResizeInput() {
 function toggleSendIcon() {
     const textInput = document.getElementById('text-input');
     const sendIcon = document.getElementById('send-icon');
+    const sendBtn = document.getElementById('send-btn');
     if (textInput && sendIcon) {
-        if (textInput.value.trim().length > 0) {
-            sendIcon.textContent = '➤';
-        } else {
-            sendIcon.textContent = '🎤';
-        }
+        sendIcon.classList.add('icon-hidden');
+        setTimeout(() => {
+            if (textInput.value.trim().length > 0) {
+                sendIcon.src = 'icons/send.svg';
+                sendBtn.removeEventListener('click', startVoiceRecognition);
+                sendBtn.addEventListener('click', handleUserMessage);
+            } else {
+                sendIcon.src = 'icons/microphone.svg';
+                sendBtn.removeEventListener('click', handleUserMessage);
+                sendBtn.addEventListener('click', startVoiceRecognition);
+            }
+            sendIcon.classList.remove('icon-hidden');
+        }, 150);
     }
+}
+
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        console.warn('Speech recognition not supported');
+        return;
+    }
+    recognition = new SpeechRecognition();
+    recognition.lang = 'ro-RO';
+    recognition.interimResults = false;
+    recognition.onstart = () => {
+        isRecording = true;
+        document.getElementById('send-icon').classList.add('recording');
+    };
+    recognition.onend = () => {
+        isRecording = false;
+        document.getElementById('send-icon').classList.remove('recording');
+    };
+    recognition.onerror = () => {
+        showToast('Eroare la recunoașterea vocală.', 'error');
+    };
+    recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        const textInput = document.getElementById('text-input');
+        textInput.value = transcript;
+        autoResizeInput();
+        toggleSendIcon();
+        handleUserMessage();
+    };
+}
+
+function startVoiceRecognition() {
+    if (!recognition) {
+        showToast('Recunoașterea vocală nu este disponibilă.', 'error');
+        return;
+    }
+    recognition.start();
 }
 
 // Message Handling Functions
@@ -647,33 +696,91 @@ function showInstallPrompt() {
     }
 }
 
+function showModal(title, content) {
+    const container = document.getElementById('modal-container');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="modal">
+            <h2>${title}</h2>
+            <div class="modal-body">${content}</div>
+            <button class="modal-close">Închide</button>
+        </div>`;
+    container.style.display = 'flex';
+    container.querySelector('.modal-close').addEventListener('click', closeModal);
+    container.addEventListener('click', (e) => {
+        if (e.target === container) closeModal();
+    });
+}
+
+function closeModal() {
+    const container = document.getElementById('modal-container');
+    if (container) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+    }
+}
+
+function openMenuModal(action) {
+    switch(action) {
+        case 'settings':
+            showModal('Setări', '<p>Aici vor fi setările aplicației.</p>');
+            break;
+        case 'help':
+            showModal('Ajutor', '<p>Secțiune de ajutor.</p>');
+            break;
+        case 'social':
+            showModal('Rețele Sociale', '<p>Urmărește-ne pe rețelele sociale.</p>');
+            break;
+        case 'premium':
+            showModal('Premium', '<p>Detalii despre versiunea Premium.</p>');
+            break;
+        case 'invite':
+            showModal('Invită prieteni', '<p>Trimite codul tău de invitație.</p>');
+            break;
+        case 'privacy':
+            showModal('Politica de confidențialitate', '<p>Informații despre confidențialitate.</p>');
+            break;
+        default:
+            break;
+    }
+}
+
 // Menu toggle functionality
 function setupEventListeners() {
     console.log('Setting up event listeners...');
     
     // Menu toggle
     const navToggle = document.getElementById('nav-toggle');
-    const navMenu = document.getElementById('nav-menu');
-    
-    if (navToggle && navMenu) {
+    const sideMenu = document.getElementById('side-menu');
+    const menuOverlay = document.getElementById('menu-overlay');
+
+    const closeMenu = () => {
+        sideMenu.classList.remove('active');
+        navToggle.classList.remove('active');
+        menuOverlay.classList.remove('active');
+    };
+
+    if (navToggle && sideMenu && menuOverlay) {
         navToggle.addEventListener('click', () => {
+            const isOpen = sideMenu.classList.toggle('active');
             navToggle.classList.toggle('active');
-            navMenu.classList.toggle('active');
+            menuOverlay.classList.toggle('active');
             console.log('Menu toggled');
+        });
+        menuOverlay.addEventListener('click', closeMenu);
+        sideMenu.querySelectorAll('.menu-item').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                openMenuModal(e.target.dataset.action);
+            });
         });
         console.log('Menu toggle listeners attached');
     } else {
         console.warn('Menu toggle elements not found');
     }
-    
-    // Close menu when clicking outside
-    document.addEventListener('click', (e) => {
-        if (navMenu && navMenu.classList.contains('active') && 
-            !navMenu.contains(e.target) && 
-            !navToggle.contains(e.target)) {
-            navMenu.classList.remove('active');
-            navToggle.classList.remove('active');
-        }
+
+    // Close menu when pressing Esc
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMenu();
     });
     
     // Setup chat listeners
@@ -685,12 +792,13 @@ function setupEventListeners() {
 
 function setupChatListeners() {
     console.log('Setting up chat listeners...');
-    
+
+    initSpeechRecognition();
+
     // Send message button
     const sendBtn = document.getElementById('send-btn');
     if (sendBtn) {
-        sendBtn.addEventListener('click', handleUserMessage);
-        console.log('Send button listener attached');
+        console.log('Send button found');
     } else {
         console.warn('Send button not found');
     }
@@ -801,7 +909,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function debugElements() {
     const elements = [
         'save-name', 'user-name', 'send-btn', 'text-input', 
-        'image-btn', 'image-input', 'nav-toggle', 'nav-menu',
+        'image-btn', 'image-input', 'nav-toggle', 'side-menu',
         'welcome-section', 'chat-section', 'usage-counter',
         'premium-status', 'trophies', 'ref-code', 'copy-ref'
     ];
