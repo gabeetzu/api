@@ -63,16 +63,26 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(cachedResponse => {
-      const fetchAndUpdate = fetch(event.request)
+  caches.match(event.request)
+    .then(cachedResponse => {
+      const fetchPromise = fetch(event.request)
         .then(networkResponse => {
-          if (networkResponse.ok && event.request.method === 'GET') {
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, networkResponse.clone()));
+          // Only cache successful responses
+          if (networkResponse && networkResponse.status === 200) {
+            // Clone BEFORE any other usage
+            const clonedResponse = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, clonedResponse);
+            });
           }
           return networkResponse;
         })
-        .catch(() => cachedResponse);
-      return cachedResponse || fetchAndUpdate;
+        .catch(error => {
+          console.error('Fetch failed:', error);
+          return cachedResponse;
+        });
+      
+      return cachedResponse || fetchPromise;
     })
-  );
-});
+);
+
