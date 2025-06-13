@@ -20,6 +20,12 @@ header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
 mb_internal_encoding("UTF-8");
 
+// Resource limits
+ini_set('memory_limit', '512M');
+ini_set('max_execution_time', 60);
+ini_set('upload_max_filesize', '10M');
+ini_set('post_max_size', '10M');
+
 ini_set('display_errors', 0);
 error_reporting(0);
 
@@ -79,10 +85,7 @@ try {
     $imageId = substr(sha1($imageBase64 ?: microtime()), 0, 8);
     
     if ($imageBase64) {
-        $uploadDir = __DIR__ . '/uploads';
-        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
-            throw new Exception('Failed to create upload directory');
-        }
+        $uploadDir = ensureUploadDirectory();
         $filename = 'img_' . $imageId . '.jpg';
         $filePath = $uploadDir . '/' . $filename;
         if (!preg_match('/^data:image\/\w+;base64,/', $imageBase64)) {
@@ -103,20 +106,12 @@ try {
             throw new Exception('Failed to save image file');
         }
 
-        $scriptPath = __DIR__ . '/cnn_yolo_infer.py';
-        if (!file_exists($scriptPath)) {
-            throw new Exception('CNN script not found');
-        }
-        $cmd = 'python3 ' . escapeshellarg($scriptPath) . ' ' . escapeshellarg($filePath) . ' 2>&1';
-        $output = shell_exec($cmd);
-        debugLog('CNN Script Output', ['output' => $output]);
-        
-        $cnn = json_decode($output, true);
+        $cnn = executeCNNAnalysis($filePath);
         if (is_array($cnn) && isset($cnn['label'])) {
             $plantLabel = sanitizeInput($cnn['label']);
             $cnnConfidence = isset($cnn['confidence']) ? floatval($cnn['confidence']) : 0;
         } else {
-            logEvent('YOLOFail', $output);
+            logEvent('YOLOFail', $cnn);
         }
         debugLog('CNN result', ['label' => $plantLabel, 'confidence' => $cnnConfidence]);
     }
@@ -289,17 +284,20 @@ TEXT;
 
     logEvent('Response', ['length' => strlen($formattedText)]);
 
-    sendResponse(true, [
-        'text' => $formattedText,
+    sendSuccessResponse($formattedText, [
         'raw' => $responseText,
         'reward' => $referralReward ? 'referral_success' : null
     ]);
 
 }
 catch (Exception $e) {
-    logEvent('Error', $e->getMessage());
-    http_response_code(400);
-    sendResponse(false, null, $e->getMessage());
+    logError('Process Image Error', [
+        'error' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+        'trace' => $e->getTraceAsString()
+    ]);
+    sendErrorResponse('Internal server error occurred');
 }
 
 // --- Helper functions ---
@@ -517,6 +515,72 @@ function sendResponse($success, $data = null, $error = null) {
     exit();
 }
 
+function sendSuccessResponse($responseText, $additionalData = []) {
+    $payload = array_merge([
+        'text' => $responseText
+    ], $additionalData);
+    sendResponse(true, $payload, null);
+}
+
+function sendErrorResponse($errorMessage, $errorCode = 500) {
+    http_response_code($errorCode);
+    sendResponse(false, null, $errorMessage);
+}
+
+function ensureUploadDirectory() {
+    $uploadDir = __DIR__ . '/uploads';
+    if (!is_dir($uploadDir)) {
+        if (!mkdir($uploadDir, 0755, true)) {
+            throw new Exception('Cannot create upload directory');
+        }
+    }
+    if (!is_writable($uploadDir) && !chmod($uploadDir, 0755)) {
+        throw new Exception('Upload directory not writable');
+    }
+    return $uploadDir;
+}
+
+function executeCNNAnalysis($imagePath) {
+    $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
+    if (!file_exists($pythonScript)) {
+        throw new Exception('CNN script not found at: ' . $pythonScript);
+    }
+    $command = sprintf(
+        'python3 %s %s 2>&1',
+        escapeshellarg($pythonScript),
+        escapeshellarg($imagePath)
+    );
+    $output = shell_exec($command);
+    if (empty($output)) {
+        throw new Exception('CNN script produced no output');
+    }
+    $result = json_decode($output, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('CNN script returned invalid JSON: ' . $output);
+    }
+    return $result;
+}
+
+function logError($message, $context = []) {
+    $logDir = __DIR__ . '/logs';
+    if (!is_dir($logDir)) {
+        mkdir($logDir, 0755, true);
+    }
+    $logEntry = [
+        'timestamp' => date('Y-m-d H:i:s'),
+        'message' => $message,
+        'context' => $context,
+        'request_method' => $_SERVER['REQUEST_METHOD'] ?? '',
+        'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? ''
+    ];
+    file_put_contents(
+        $logDir . '/error.log',
+        json_encode($logEntry, JSON_UNESCAPED_UNICODE) . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+}
+
 function logEvent($label, $data) {
     $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
@@ -568,8 +632,11 @@ function getInputData() {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'multipart/form-data') !== false) {
         $data = $_POST;
-        if (isset($_FILES['image'])) {
-            $data['image'] = file_get_contents($_FILES['image']['tmp_name']);
+        if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+            $tmp = $_FILES['image']['tmp_name'];
+            $mime = mime_content_type($tmp) ?: 'image/jpeg';
+            $imgData = file_get_contents($tmp);
+            $data['image'] = 'data:' . $mime . ';base64,' . base64_encode($imgData);
         }
         return $data;
     }
