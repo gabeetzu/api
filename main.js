@@ -10,6 +10,46 @@ let isProcessing = false;
 let recognition = null;
 let isRecording = false;
 
+// Basic analytics logger
+const Analytics = {
+    logEvent(event, data = {}) {
+        const payload = {
+            event,
+            data,
+            device_hash: UsageTracker ? UsageTracker.deviceHash : null,
+            timestamp: Date.now()
+        };
+        fetch(`${BASE_URL}log-analytics.php`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).catch(err => console.error('Analytics error', err));
+    }
+};
+
+// Interstitial ad manager
+const AdManager = {
+    inquiryCount: 0,
+
+    recordRequest() {
+        if (UsageTracker && UsageTracker.isPremium) return;
+        this.inquiryCount++;
+        if (this.inquiryCount % 3 === 0) {
+            this.showInterstitial();
+        }
+    },
+
+    showInterstitial() {
+        const start = performance.now();
+        const content = '<p class="ad-placeholder">Reclamă (AdMob placeholder)</p>';
+        showModal('Publicitate', content, () => {
+            Analytics.logEvent('ad_closed');
+        });
+        const loadTime = Math.round(performance.now() - start);
+        Analytics.logEvent('ad_impression', { placement: 'interstitial', load_ms: loadTime });
+    }
+};
+
 // Register service worker for PWA functionality
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js')
@@ -82,6 +122,12 @@ const UsageTracker = {
                     this.premiumUntil = data.stats.premium_until || null;
                     this.textLimit = data.stats.text_limit || (this.isPremium ? 10 : 3);
                     this.imageLimit = data.stats.image_limit || (this.isPremium ? 3 : 1);
+
+                    const prevPremium = localStorage.getItem('is_premium') === 'true';
+                    localStorage.setItem('is_premium', this.isPremium);
+                    if (!prevPremium && this.isPremium) {
+                        Analytics.logEvent('premium_conversion');
+                    }
                     
                     // Update UI
                     this.updateUI();
@@ -450,6 +496,8 @@ function handleUserMessage() {
     
     if (!UsageTracker.canMakeRequest('text')) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
+        showPremiumUpgrade();
+        Analytics.logEvent('upgrade_prompt', {type: 'limit_text'});
         return;
     }
     
@@ -479,6 +527,8 @@ function handleImageUpload(files) {
     
     if (!UsageTracker.canMakeRequest('image')) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
+        showPremiumUpgrade();
+        Analytics.logEvent('upgrade_prompt', {type: 'limit_image'});
         return;
     }
     
@@ -575,6 +625,8 @@ function sendMessageToAPI(message, imageData) {
     })
     .finally(() => {
         isProcessing = false;
+        Analytics.logEvent('request', {type: imageData ? 'image' : 'text'});
+        AdManager.recordRequest();
     });
 }
 
@@ -705,7 +757,7 @@ function showInstallPrompt() {
     }
 }
 
-function showModal(title, content) {
+function showModal(title, content, onClose = null) {
     const container = document.getElementById('modal-container');
     if (!container) return;
     container.innerHTML = `
@@ -715,9 +767,15 @@ function showModal(title, content) {
             <button class="modal-close">Închide</button>
         </div>`;
     container.style.display = 'flex';
-    container.querySelector('.modal-close').addEventListener('click', closeModal);
+    container.querySelector('.modal-close').addEventListener('click', () => {
+        closeModal();
+        if (onClose) onClose();
+    });
     container.addEventListener('click', (e) => {
-        if (e.target === container) closeModal();
+        if (e.target === container) {
+            closeModal();
+            if (onClose) onClose();
+        }
     });
 }
 
@@ -744,7 +802,10 @@ function showPremiumUpgrade() {
         <p style="margin-top:1rem;">Preț: <strong>4.99 RON/lună</strong> (disponibil curând pe Google Play)</p>
         <button id="upgrade-btn" class="modal-close">OK</button>
     `;
-    showModal('Upgrade Premium', benefits);
+    showModal('Upgrade Premium', benefits, () => {
+        Analytics.logEvent('upgrade_prompt_closed');
+    });
+    Analytics.logEvent('upgrade_prompt_shown');
 }
 
 function openMenuModal(action) {
@@ -914,6 +975,7 @@ document.addEventListener('DOMContentLoaded', function() {
         Trophies.render();
         setupEventListeners();
         updateReferralDisplay();
+        Analytics.logEvent('session_start');
         
         // Check if user has a name saved
         const savedName = localStorage.getItem('user_name');
