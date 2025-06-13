@@ -5,19 +5,23 @@ set_error_handler(function ($errno, $errstr, $errfile, $errline) {
 });
 
 header('Content-Type: application/json; charset=utf-8');
+// Comprehensive CORS configuration for Netlify deployment
 $allowedOrigins = [
-    'https://netlify.app',
-    'https://gospodapp.ro',
-    'https://gabeetzu-project.onrender.com'
+    'https://creative-sunshine-d68104.netlify.app',
+    'https://localhost:3000',
+    'http://localhost:3000'
 ];
+
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins) || strpos($origin, '.onrender.com') !== false) {
-    header('Access-Control-Allow-Origin: ' . $origin);
+if (in_array($origin, $allowedOrigins)) {
+    header("Access-Control-Allow-Origin: $origin");
 } else {
-    header('Access-Control-Allow-Origin: *');
+    header("Access-Control-Allow-Origin: *");
 }
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-KEY');
+
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Allow-Credentials: true");
 mb_internal_encoding("UTF-8");
 
 // Resource limits
@@ -26,8 +30,10 @@ ini_set('max_execution_time', 60);
 ini_set('upload_max_filesize', '10M');
 ini_set('post_max_size', '10M');
 
-ini_set('display_errors', 0);
-error_reporting(0);
+ini_set('display_errors', 0); // Don't display to user
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/error.log');
+error_reporting(E_ALL);
 
 // --- CORS Preflight ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -39,6 +45,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $rawBody = file_get_contents('php://input');
 
 require_once __DIR__ . '/security.php';
+
+// Validate critical environment variables
+validateEnvironment();
+
+// Simple debug endpoint to verify API status
+if (isset($_GET['debug']) && $_GET['debug'] === 'test') {
+    sendJSONResponse(true, [
+        'status' => 'API working',
+        'timestamp' => date('Y-m-d H:i:s'),
+        'server' => $_SERVER['SERVER_NAME'] ?? 'unknown',
+        'php_version' => PHP_VERSION,
+        'env_vars' => [
+            'openai_key_set' => !empty($_ENV['OPENAI_API_KEY'] ?? getenv('OPENAI_API_KEY')),
+            'db_host_set' => !empty($_ENV['DATABASE_HOST'] ?? getenv('DATABASE_HOST'))
+        ]
+    ]);
+}
 
 // --- API Key Validation ---
 //$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
@@ -53,18 +76,7 @@ require_once __DIR__ . '/security.php';
 
 // --- Database Connection ---
 try {
-    $dsn = sprintf(
-        'mysql:host=%s;dbname=%s;charset=utf8mb4',
-        getenv('DB_HOST'),
-        getenv('DB_NAME')
-    );
-    
-    $pdo = new PDO($dsn, getenv('DB_USER'), getenv('DB_PASS'), [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false
-    ]);
-    
+    $pdo = getDatabaseConnection();
 } catch (Exception $e) {
     logEvent('DBError', $e->getMessage());
     http_response_code(500);
@@ -75,7 +87,7 @@ try {
 if (!validateRequestSignature($rawBody)) {
     logSecurityEvent($pdo, 'unknown', 'bypass_attempt');
     http_response_code(401);
-    sendResponse(false, null, 'Invalid request signature');
+    sendJSONResponse(false, null, 'Database connection failed', 500);
 }
 
 // --- Main Logic ---
@@ -98,26 +110,7 @@ try {
     $imageId = substr(sha1($imageBase64 ?: microtime()), 0, 8);
     
     if ($imageBase64) {
-        $uploadDir = ensureUploadDirectory();
-        $filename = 'img_' . $imageId . '.jpg';
-        $filePath = $uploadDir . '/' . $filename;
-        if (!preg_match('/^data:image\/\w+;base64,/', $imageBase64)) {
-            throw new Exception('Invalid image format');
-        }
-        $data = preg_replace('#^data:image/\w+;base64,#i', '', $imageBase64);
-         $imageData = base64_decode($data, true);
-        if ($imageData === false) {
-            throw new Exception('Failed to decode image data');
-        }
-
-        $imageInfo = getimagesizefromstring($imageData);
-        if ($imageInfo === false) {
-            throw new Exception('Invalid image file');
-        }
-
-        if (file_put_contents($filePath, $imageData) === false) {
-            throw new Exception('Failed to save image file');
-        }
+        $filePath = processImageUpload($imageBase64);
 
         $cnn = executeCNNAnalysis($filePath);
         if (is_array($cnn) && isset($cnn['label'])) {
@@ -226,9 +219,9 @@ try {
     
     // Track usage for text or image
     if (!empty($imageBase64)) {
-        trackUsage($pdo, $deviceHash, 'image');
+        trackUsage($deviceHash, 'image');
     } else {
-        trackUsage($pdo, $deviceHash, 'text');
+        trackUsage($deviceHash, 'text');
     }
 
     if ($deviceHash && $userName) {
@@ -343,7 +336,10 @@ catch (Exception $e) {
         'line' => $e->getLine(),
         'trace' => $e->getTraceAsString()
     ]);
-    sendErrorResponse('Internal server error occurred');
+    sendJSONResponse(false, null, 'Internal server error occurred', 500);
+} catch (Error $e) {
+    error_log('PHP Fatal Error: ' . $e->getMessage());
+    sendJSONResponse(false, null, 'Server configuration error', 500);
 }
 
 // --- Helper functions ---
@@ -515,29 +511,75 @@ function validateDeviceHash($hash) {
     }
 }
 
-function trackUsage($pdo, $deviceHash, $type) {
-    $allowedTypes = ['image' => 'image_count', 'text' => 'text_count'];
-    if (!isset($allowedTypes[$type])) {
-        throw new InvalidArgumentException('Invalid tracking type');
-    }
+function trackUsage($deviceHash, $type) {
+    try {
+        $pdo = getDatabaseConnection();
+
+    $allowedTypes = ['text' => 'text_count', 'image' => 'image_count'];
+        if (!isset($allowedTypes[$type])) {
+            throw new Exception("Invalid usage type: $type");
+        }
+
     $field = $allowedTypes[$type];
+        $today = date('Y-m-d');
 
-    $today = date('Y-m-d');
-    $now = date('Y-m-d H:i:s');
+    // Check existing record
+        $stmt = $pdo->prepare(
+            "SELECT id FROM usage_tracking \n            WHERE device_hash = ? AND date = ?"
+        );
+        $stmt->execute([$deviceHash, $today]);
+        $existingId = $stmt->fetchColumn();
 
-    $stmt = $pdo->prepare("SELECT id FROM usage_tracking WHERE device_hash = ? AND date = ?");
-    $stmt->execute([$deviceHash, $today]);
-    $existingId = $stmt->fetchColumn();
+        if ($existingId) {
+            $sql = "UPDATE usage_tracking SET {$field} = {$field} + 1, last_request = NOW() WHERE id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$existingId]);
+        } else {
+            $sql = "INSERT INTO usage_tracking (device_hash, date, {$field}, created_at, last_request) VALUES (?, ?, 1, NOW(), NOW())";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$deviceHash, $today]);
+        }
 
-    if ($existingId) {
-        $sql = "UPDATE usage_tracking SET {$field} = {$field} + 1, last_request = ? WHERE id = ?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$now, $existingId]);
-    } else {
-        $sql = "INSERT INTO usage_tracking (device_hash, date, {$field}, created_at, last_request) VALUES (?, ?, 1, ?, ?)";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$deviceHash, $today, $now, $now]);
+        return true;
+
+    } catch (PDOException $e) {
+        error_log("Usage tracking failed: " . $e->getMessage());
+        return false;
     }
+}
+
+function getDatabaseConnection() {
+    static $pdo = null;
+
+    if ($pdo === null) {
+        try {
+            $dsn = sprintf(
+                "mysql:host=%s;dbname=%s;charset=utf8mb4",
+                $_ENV['DATABASE_HOST'] ?? getenv('DATABASE_HOST'),
+                $_ENV['DATABASE_NAME'] ?? getenv('DATABASE_NAME')
+            );
+
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_PERSISTENT => false
+            ];
+
+            $pdo = new PDO(
+                $dsn,
+                $_ENV['DATABASE_USER'] ?? getenv('DATABASE_USER'),
+                $_ENV['DATABASE_PASSWORD'] ?? getenv('DATABASE_PASSWORD'),
+                $options
+            );
+
+        } catch (PDOException $e) {
+            error_log("Database connection failed: " . $e->getMessage());
+            throw new Exception("Database connection failed");
+        }
+    }
+
+    return $pdo;
 }
 
 function jsonResponse($success, $payload) {
@@ -546,6 +588,21 @@ function jsonResponse($success, $payload) {
         'error' => $success ? null : $payload,
         'response' => $success ? $payload : null
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function sendJSONResponse($success, $data = null, $error = null, $httpCode = 200) {
+    http_response_code($httpCode);
+    header('Content-Type: application/json; charset=utf-8');
+
+    $response = [
+        'success' => $success,
+        'response' => $success ? $data : null,
+        'error' => $success ? null : $error,
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit();
 }
 
 function sendResponse($success, $data = null, $error = null) {
@@ -586,24 +643,97 @@ function ensureUploadDirectory() {
     return $uploadDir;
 }
 
-function executeCNNAnalysis($imagePath) {
-    $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
-    if (!file_exists($pythonScript)) {
-        throw new Exception('CNN script not found at: ' . $pythonScript);
+function processImageUpload($base64 = null) {
+    $imageData = null;
+
+    // Handle file upload
+    if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+        $imageData = file_get_contents($_FILES['image']['tmp_name']);
     }
+    // Handle base64 data
+    elseif ($base64 !== null || (isset($_POST['image']) && !empty($_POST['image']))) {
+        $source = $base64 !== null ? $base64 : $_POST['image'];
+        if (preg_match('/^data:image\/(\w+);base64,/', $source)) {
+            $data = preg_replace('#^data:image/\w+;base64,#i', '', $source);
+            $imageData = base64_decode($data, true);
+
+            if ($imageData === false) {
+                throw new Exception("Failed to decode base64 image data");
+            }
+        }
+    }
+
+    if (!$imageData) {
+        throw new Exception("No valid image data received");
+    }
+
+    // Validate image
+    $imageInfo = getimagesizefromstring($imageData);
+    if ($imageInfo === false) {
+        throw new Exception("Invalid image file format");
+    }
+
+    // Save image
+    $uploadDir = __DIR__ . '/uploads';
+    if (!is_dir($uploadDir)) {
+        if (!mkdir($uploadDir, 0755, true)) {
+            throw new Exception("Cannot create upload directory");
+        }
+    }
+
+    $filename = 'img_' . uniqid() . '.jpg';
+    $filePath = $uploadDir . '/' . $filename;
+
+    if (file_put_contents($filePath, $imageData) === false) {
+        throw new Exception("Failed to save image file");
+    }
+
+    return $filePath;
+}
+
+function executeCNNAnalysis($imagePath) {
+    // Use absolute path to Python script in same directory
+    $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
+    
+    // Verify script exists
+    if (!file_exists($pythonScript)) {
+        throw new Exception("CNN script not found at: $pythonScript");
+    }
+
+    // Verify model file exists
+    $modelPath = __DIR__ . '/best.pt';
+    if (!file_exists($modelPath)) {
+        throw new Exception("CNN model file not found at: $modelPath");
+    }
+
+    // Verify Python is available
+    $pythonCheck = shell_exec('which python3 2>/dev/null');
+    if (empty($pythonCheck)) {
+        throw new Exception("Python3 not found on server");
+    }
+    
+    // Execute with proper error capture
     $command = sprintf(
-        'python3 %s %s 2>&1',
+        'cd %s && python3 %s %s 2>&1',
+        escapeshellarg(__DIR__),
         escapeshellarg($pythonScript),
         escapeshellarg($imagePath)
     );
+    
+    error_log("Executing CNN command: $command");
     $output = shell_exec($command);
+     error_log("CNN output: $output");
+    
     if (empty($output)) {
-        throw new Exception('CNN script produced no output');
+        throw new Exception("CNN script produced no output");
     }
+    
+    // Parse JSON output
     $result = json_decode($output, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception('CNN script returned invalid JSON: ' . $output);
+        throw new Exception("CNN script returned invalid JSON: $output");
     }
+    
     return $result;
 }
 
@@ -675,4 +805,14 @@ function getInputData($rawBody = null) {
     }
     
     return $_POST;
+}
+
+function validateEnvironment() {
+    $required = ['OPENAI_API_KEY', 'DATABASE_HOST', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD'];
+
+    foreach ($required as $var) {
+        if (empty($_ENV[$var]) && empty(getenv($var))) {
+            throw new Exception("Missing required environment variable: $var");
+        }
+    }
 }
