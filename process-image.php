@@ -35,6 +35,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
+// Read raw body early for signature validation
+$rawBody = file_get_contents('php://input');
+
+require_once __DIR__ . '/security.php';
+
 // --- API Key Validation ---
 //$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 //$expectedKey = getenv('API_SECRET_KEY');
@@ -59,15 +64,23 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false
     ]);
+    
 } catch (Exception $e) {
     logEvent('DBError', $e->getMessage());
     http_response_code(500);
     sendResponse(false, null, 'Database connection failed');
 }
 
+// --- Request Signature Validation ---
+if (!validateRequestSignature($rawBody)) {
+    logSecurityEvent($pdo, 'unknown', 'bypass_attempt');
+    http_response_code(401);
+    sendResponse(false, null, 'Invalid request signature');
+}
+
 // --- Main Logic ---
 try {
-    $input = getInputData();
+    $input = getInputData($rawBody);
     logEvent('Input', $input);
     debugLog('Request received', $input);
 
@@ -124,6 +137,10 @@ try {
     $weather = sanitizeInput($input['weather'] ?? '');
     $deviceHash = sanitizeInput($input['device_hash'] ?? '');
     $refCode    = sanitizeInput($input['ref_code'] ?? '');
+    
+    $ipAddress  = $_SERVER['REMOTE_ADDR'] ?? '';
+    $userAgent  = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $fingerprint = sha1(($deviceHash ?: 'unknown') . $ipAddress . $userAgent);
     try {
         $stmt = $pdo->prepare("INSERT INTO usage_log (device_hash, label, created_at) VALUES (?, ?, NOW())");
         $stmt->execute([$deviceHash, $plantLabel]);
@@ -200,8 +217,9 @@ try {
         }
     }
 
-     $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
+     $rateId = $fingerprint;
     if (!checkRateLimit($rateId, 30, 3600, $isPremium)) {
+        logSecurityEvent($pdo, $deviceHash ?: 'unknown', 'limit_exceeded');
         http_response_code(429);
         sendResponse(false, null, 'Prea multe cereri, încearcă mai târziu.');
     }
@@ -637,26 +655,7 @@ function debugLog($message, $data = []) {
     );
 }
 
-function checkRateLimit($id, $limit = 30, $window = 3600, $isPremium = false) {
-    if ($isPremium) return true;
-    $dir = sys_get_temp_dir() . '/gospod_rl';
-    if (!file_exists($dir)) mkdir($dir, 0775, true);
-    $file = $dir . '/' . sha1($id) . '.json';
-    $now = time();
-    $data = ['count' => 1, 'start' => $now];
-    if (file_exists($file)) {
-        $data = json_decode(file_get_contents($file), true) ?: $data;
-        if ($now - $data['start'] > $window) {
-            $data = ['count' => 1, 'start' => $now];
-        } else {
-            $data['count']++;
-        }
-    }
-    file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-    return $data['count'] <= $limit;
-}
-
-function getInputData() {
+function getInputData($rawBody = null) {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
     if (stripos($contentType, 'multipart/form-data') !== false) {
         $data = $_POST;
@@ -670,7 +669,7 @@ function getInputData() {
     }
 
         if (stripos($contentType, 'application/json') !== false) {
-        $json = file_get_contents('php://input');
+        $json = $rawBody !== null ? $rawBody : file_get_contents('php://input');
         $decoded = json_decode($json, true);
         return is_array($decoded) ? $decoded : [];
     }
