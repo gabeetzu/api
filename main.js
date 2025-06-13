@@ -453,30 +453,44 @@ function sendMessageToAPI(message, imageData) {
         body: formData
     })
     .then(response => {
+        console.log('Response status:', response.status);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        return response.json();
+        return response.text();
     })
-    .then(data => {
-        hideTypingIndicator();
-        console.log('API response received:', data);
-        
-        if (data.success) {
-            addMessage(data.response, 'bot');
-        } else {
-            addMessage('Ne pare rău, a apărut o eroare. Te rog să încerci din nou.', 'bot');
-            console.error('API Error:', data.error);
+    .then(text => {
+        console.log('Raw response:', text);
+        try {
+            const data = JSON.parse(text);
+            console.log('Parsed response:', data);
+
+            hideTypingIndicator();
+
+            if (data.success) {
+                const responseText = handleAPIResponse(data.response);
+                addMessage(responseText, 'bot');
+            } else {
+                const errorMsg = data.error || 'A apărut o eroare necunoscută.';
+                addMessage(`Ne pare rău, ${errorMsg}`, 'bot');
+                console.error('API Error:', data.error);
+            }
+        } catch (parseError) {
+            console.error('JSON Parse Error:', parseError);
+            console.error('Response text:', text);
+            addMessage('Eroare la procesarea răspunsului. Te rog să încerci din nou.', 'bot');
         }
     })
     .catch(error => {
         hideTypingIndicator();
         console.error('Network Error:', error);
-        
+
         if (error.message.includes('Failed to fetch')) {
             addMessage('Nu pot să mă conectez la server. Verifică conexiunea la internet și încearcă din nou.', 'bot');
+        } else if (error.message.includes('HTTP error! status: 413')) {
+            addMessage('Imaginea este prea mare. Te rog să folosești o imagine mai mică.', 'bot');
         } else {
-            addMessage('Ne pare rău, nu te pot ajuta acum. Te rog să încerci din nou mai târziu.', 'bot');
+            addMessage('Ne pare rău, nu te putem ajuta acum. Te rog să încerci din nou mai târziu.', 'bot');
         }
     })
     .finally(() => {
@@ -495,6 +509,25 @@ function dataURLtoBlob(dataURL) {
         u8arr[n] = bstr.charCodeAt(n);
     }
     return new Blob([u8arr], { type: mime });
+}
+
+function handleAPIResponse(data) {
+    if (!data) {
+        throw new Error('Empty response from server');
+    }
+    if (typeof data === 'string') {
+        return data;
+    }
+    if (typeof data === 'object') {
+        if (data.hasOwnProperty('response')) {
+            return data.response;
+        }
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+            return data.choices[0].message.content;
+        }
+        return JSON.stringify(data);
+    }
+    return String(data);
 }
 
 function showToast(message, type = 'info') {
