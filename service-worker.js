@@ -44,33 +44,35 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   // Handle API requests
-  if (event.request.url.includes('/process-image') || 
-      event.request.url.includes('/log-usage') || 
+  if (event.request.url.includes('/process-image') ||
+      event.request.url.includes('/log-usage') ||
       event.request.url.includes('/get-usage')) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request)
-      .then(cachedResponse => {
-        const fetchAndUpdate = fetch(event.request)
-          .then(networkResponse => {
-            // Update cache for successful GET requests
-            if (networkResponse.ok && event.request.method === 'GET') {
-              const clone = networkResponse.clone();
-              caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-            }
-            return networkResponse;
-          })
-          .catch(async error => {
-            // Show offline page for navigation requests
-            if (event.request.mode === 'navigate') {
-              return caches.match('/offline.html');
-            }
-            return cachedResponse;
-          });
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then(r => r || caches.match('/offline.html')))
+    );
+    return;
+  }
 
-        return cachedResponse || fetchAndUpdate;
-      })
+  event.respondWith(
+    caches.match(event.request).then(cachedResponse => {
+      const fetchAndUpdate = fetch(event.request)
+        .then(networkResponse => {
+          if (networkResponse.ok && event.request.method === 'GET') {
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, networkResponse.clone()));
+          }
+          return networkResponse;
+        })
+        .catch(() => cachedResponse);
+      return cachedResponse || fetchAndUpdate;
+    })
   );
 });
