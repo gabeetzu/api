@@ -1,13 +1,17 @@
 <?php
-set_error_handler(function($errno, $errstr, $errfile, $errline) {
-    $log = "[" . date("Y-m-d H:i:s") . "] PHP ERROR: $errstr in $errfile on line $errline\n";
-    file_put_contents("/var/data/logs/errors.csv", $log, FILE_APPEND);
+set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+    $log = "[" . date('Y-m-d H:i:s') . "] PHP ERROR: $errstr in $errfile on line $errline\n";
+    file_put_contents('/var/data/logs/errors.csv', $log, FILE_APPEND);
 });
 
 header('Content-Type: application/json; charset=utf-8');
-$allowedOrigins = ['https://netlify.app', 'https://gospodapp.ro'];
+$allowedOrigins = [
+    'https://netlify.app',
+    'https://gospodapp.ro',
+    'https://gabeetzu-project.onrender.com'
+];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins)) {
+if (in_array($origin, $allowedOrigins) || strpos($origin, '.onrender.com') !== false) {
     header('Access-Control-Allow-Origin: ' . $origin);
 } else {
     header('Access-Control-Allow-Origin: *');
@@ -38,23 +42,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // --- Database Connection ---
 try {
-    $pdo = new PDO(
-        "mysql:host=" . getenv('DB_HOST') . ";dbname=" . getenv('DB_NAME') . ";charset=utf8mb4",
-        getenv('DB_USER'),
-        getenv('DB_PASS'),
-        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    $dsn = sprintf(
+        'mysql:host=%s;dbname=%s;charset=utf8mb4',
+        getenv('DB_HOST'),
+        getenv('DB_NAME')
     );
+    
+    $pdo = new PDO($dsn, getenv('DB_USER'), getenv('DB_PASS'), [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false
+    ]);
 } catch (Exception $e) {
     logEvent('DBError', $e->getMessage());
     http_response_code(500);
-    echo jsonResponse(false, 'Eroare conexiune la baza de date');
-    exit();
+    sendResponse(false, null, 'Database connection failed');
 }
 
 // --- Main Logic ---
 try {
     $input = getInputData();
     logEvent('Input', $input);
+    debugLog('Request received', $input);
 
     $userMessage = sanitizeInput($input['message'] ?? '');
     $imageBase64 = $input['image'] ?? '';
@@ -71,17 +80,37 @@ try {
     
     if ($imageBase64) {
         $uploadDir = __DIR__ . '/uploads';
-        if (!file_exists($uploadDir)) {
-            mkdir($uploadDir, 0775, true);
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
+            throw new Exception('Failed to create upload directory');
         }
         $filename = 'img_' . $imageId . '.jpg';
         $filePath = $uploadDir . '/' . $filename;
+        if (!preg_match('/^data:image\/\w+;base64,/', $imageBase64)) {
+            throw new Exception('Invalid image format');
+        }
         $data = preg_replace('#^data:image/\w+;base64,#i', '', $imageBase64);
-        file_put_contents($filePath, base64_decode($data));
+         $imageData = base64_decode($data, true);
+        if ($imageData === false) {
+            throw new Exception('Failed to decode image data');
+        }
 
-        $script = escapeshellarg(__DIR__ . '/api-PWAPP/cnn_yolo_infer.py');
-        $cmd = "python3 $script " . escapeshellarg($filePath);
+        $imageInfo = getimagesizefromstring($imageData);
+        if ($imageInfo === false) {
+            throw new Exception('Invalid image file');
+        }
+
+        if (file_put_contents($filePath, $imageData) === false) {
+            throw new Exception('Failed to save image file');
+        }
+
+        $scriptPath = __DIR__ . '/cnn_yolo_infer.py';
+        if (!file_exists($scriptPath)) {
+            throw new Exception('CNN script not found');
+        }
+        $cmd = 'python3 ' . escapeshellarg($scriptPath) . ' ' . escapeshellarg($filePath) . ' 2>&1';
         $output = shell_exec($cmd);
+        debugLog('CNN Script Output', ['output' => $output]);
+        
         $cnn = json_decode($output, true);
         if (is_array($cnn) && isset($cnn['label'])) {
             $plantLabel = sanitizeInput($cnn['label']);
@@ -89,6 +118,7 @@ try {
         } else {
             logEvent('YOLOFail', $output);
         }
+        debugLog('CNN result', ['label' => $plantLabel, 'confidence' => $cnnConfidence]);
     }
 
     $cnnDiagnosis = $plantLabel;
@@ -126,8 +156,7 @@ try {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row && $row['pending_deletion']) {
             http_response_code(403);
-            echo jsonResponse(false, "Contul t\u0103u este programat pentru \u0219tergere. Accesul este restric\u021bionat pentru 7 zile.");
-            exit();
+            sendResponse(false, null, 'Contul tău este programat pentru ștergere. Accesul este restricționat pentru 7 zile.');
         }
 
         // --- Referral Handling ---
@@ -151,8 +180,7 @@ try {
      $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
     if (!checkRateLimit($rateId, 30, 3600, $isPremium)) {
         http_response_code(429);
-        echo jsonResponse(false, 'Prea multe cereri, încearcă mai târziu.');
-        exit();
+        sendResponse(false, null, 'Prea multe cereri, încearcă mai târziu.');
     }
     
     // Track usage for text or image
@@ -243,10 +271,11 @@ TEXT;
     $userContent = $finalPrompt . "\n\n" . $userContent;
     $currentUserMessage = ['role' => 'user', 'content' => $userContent];
 
-    $messagesForGPT = array_merge([$systemMessage], $historyMessages, [$currentUserMessage]);
+    $messagesForGPT = formatMessagesForGPT($systemMessage, $historyMessages, $currentUserMessage);
 
     // Call GPT with full conversation context
     $responseText = getGPTResponse($messagesForGPT);
+    debugLog('GPT response', ['response_length' => strlen($responseText)]);
 
     // Save user message + GPT response for context next time
     saveChatMessage($pdo, $deviceHash, $userContent, true);
@@ -260,25 +289,17 @@ TEXT;
 
     logEvent('Response', ['length' => strlen($formattedText)]);
 
-    echo json_encode([
-        'success' => true,
-        'response_id' => bin2hex(random_bytes(6)),
-        'response' => [
-            'text' => $formattedText,
-            'raw' => $responseText
-        ],
+    sendResponse(true, [
+        'text' => $formattedText,
+        'raw' => $responseText,
         'reward' => $referralReward ? 'referral_success' : null
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    ]);
 
 }
 catch (Exception $e) {
     logEvent('Error', $e->getMessage());
     http_response_code(400);
-    echo json_encode([
-        'success' => false,
-        'response_id' => bin2hex(random_bytes(6)),
-        'error' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    sendResponse(false, null, $e->getMessage());
 }
 
 // --- Helper functions ---
@@ -333,17 +354,22 @@ function formatFeaturesText(array $features) {
 }
 
 function getGPTResponse(array $messages, $retries = 2) {
+    $apiKey = getenv('OPENAI_API_KEY');
+    if (empty($apiKey)) {
+        throw new Exception('OpenAI API key not configured');
+    }
+
     $attempt = 0;
     do {
         $attempt++;
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_TIMEOUT => 12,
             CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . getenv('OPENAI_API_KEY')
+                'Authorization: Bearer ' . $apiKey
             ],
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode([
@@ -354,17 +380,28 @@ function getGPTResponse(array $messages, $retries = 2) {
                 'top_p' => 0.9
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         ]);
+        
         $res = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
-        if ($res && $httpCode === 200) {
+        
+        if ($curlError) {
+            throw new Exception('cURL error: ' . $curlError);
+        }
+
+        if ($httpCode === 200 && $res) {
             $data = json_decode($res, true);
             if (json_last_error() === JSON_ERROR_NONE && !empty($data['choices'][0]['message']['content'])) {
                 return formatResponse($data['choices'][0]['message']['content']);
             }
+            } elseif ($httpCode !== 200) {
+            throw new Exception('OpenAI API error: HTTP ' . $httpCode);
         }
+        
         sleep(1);
     } while ($attempt <= $retries);
+    
     throw new Exception('OpenAI API indisponibil.');
 }
 
@@ -410,9 +447,21 @@ function loadRecentMessages($pdo, $deviceHash, $limit = 10) {
     return $messages;
 }
 
+function formatMessagesForGPT($systemMessage, array $historyMessages, array $currentMessage) {
+    $messages = [$systemMessage];
+    foreach ($historyMessages as $msg) {
+        $messages[] = [
+            'role' => $msg['role'],
+            'content' => $msg['content']
+        ];
+    }
+    $messages[] = $currentMessage;
+    return $messages;
+}
+
 function sanitizeInput($text) {
     $clean = trim(strip_tags($text));
-    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()\-]/u', '', $clean);
+    $clean = preg_replace('/[^\p{L}\p{N}\s.,!?()\-:\"\']/u', '', $clean);
     return mb_substr($clean, 0, 300);
 }
 
@@ -432,15 +481,17 @@ function trackUsage($pdo, $deviceHash, $type) {
     $today = date('Y-m-d');
     $now = date('Y-m-d H:i:s');
 
-    $stmt = $pdo->prepare("SELECT * FROM usage_tracking WHERE device_hash = ? AND date = ?");
+    $stmt = $pdo->prepare("SELECT id FROM usage_tracking WHERE device_hash = ? AND date = ?");
     $stmt->execute([$deviceHash, $today]);
-    $usage = $stmt->fetch(PDO::FETCH_ASSOC);
+    $existingId = $stmt->fetchColumn();
 
-    if ($usage) {
-        $stmt = $pdo->prepare("UPDATE usage_tracking SET $field = $field + 1, last_request = ? WHERE id = ?");
-        $stmt->execute([$now, $usage['id']]);
+    if ($existingId) {
+        $sql = "UPDATE usage_tracking SET {$field} = {$field} + 1, last_request = ? WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$now, $existingId]);
     } else {
-        $stmt = $pdo->prepare("INSERT INTO usage_tracking (device_hash, date, $field, created_at, last_request) VALUES (?, ?, 1, ?, ?)");
+        $sql = "INSERT INTO usage_tracking (device_hash, date, {$field}, created_at, last_request) VALUES (?, ?, 1, ?, ?)";
+        $stmt = $pdo->prepare($sql);
         $stmt->execute([$deviceHash, $today, $now, $now]);
     }
 }
@@ -453,11 +504,45 @@ function jsonResponse($success, $payload) {
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
+function sendResponse($success, $data = null, $error = null) {
+    $response = [
+        'success' => $success,
+        'response' => $success ? $data : null,
+        'error' => $success ? null : $error,
+        'timestamp' => date('Y-m-d H:i:s')
+    ];
+
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit();
+}
+
 function logEvent($label, $data) {
     $dir = __DIR__ . '/logs';
     if (!file_exists($dir)) mkdir($dir, 0775, true);
     $line = date('Y-m-d H:i:s') . " [$label] " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
     file_put_contents($dir . '/activity.log', $line, FILE_APPEND | LOCK_EX);
+}
+
+function debugLog($message, $data = []) {
+    $logDir = __DIR__ . '/logs';
+    if (!file_exists($logDir)) {
+        mkdir($logDir, 0775, true);
+    }
+
+    $entry = [
+        'timestamp' => date('Y-m-d H:i:s'),
+        'message' => $message,
+        'data' => $data,
+        'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+        'method' => $_SERVER['REQUEST_METHOD'] ?? ''
+    ];
+
+    file_put_contents(
+        $logDir . '/debug.log',
+        json_encode($entry, JSON_UNESCAPED_UNICODE) . "\n",
+        FILE_APPEND | LOCK_EX
+    );
 }
 
 function checkRateLimit($id, $limit = 30, $window = 3600, $isPremium = false) {
@@ -481,16 +566,19 @@ function checkRateLimit($id, $limit = 30, $window = 3600, $isPremium = false) {
 
 function getInputData() {
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (stripos($contentType, 'application/json') !== false) {
-        $json = file_get_contents('php://input');
-        $data = json_decode($json, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            // logEvent('JSONDecodeError', ['error' => json_last_error_msg(), 'raw' => $json]);
-            return [];
+    if (stripos($contentType, 'multipart/form-data') !== false) {
+        $data = $_POST;
+        if (isset($_FILES['image'])) {
+            $data['image'] = file_get_contents($_FILES['image']['tmp_name']);
         }
-
-        return is_array($data) ? $data : [];
+        return $data;
     }
+
+        if (stripos($contentType, 'application/json') !== false) {
+        $json = file_get_contents('php://input');
+        $decoded = json_decode($json, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+    
     return $_POST;
 }
