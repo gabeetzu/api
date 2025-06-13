@@ -816,3 +816,14 @@ body {
 .premium-table th {
     background: var(--surface);
 }
+
+/* Ad placeholder */
+.ad-placeholder {
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f1f1;
+    color: #333;
+    border: 2px dashed #ccc;
+}
