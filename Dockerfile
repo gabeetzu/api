@@ -19,7 +19,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python packages with CPU-only PyTorch
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+RUN /opt/venv/bin/python - <<'PY'
+import json, torch, cv2, importlib
+print(json.dumps({
+    "torch": torch.__version__,
+    "cuda_avail": torch.cuda.is_available(),
+    "cv_version": cv2.__version__,
+    "ultra_ok": bool(importlib.util.find_spec("ultralytics"))
+}))
+PY
 
 # PHP extensions
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
