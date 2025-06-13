@@ -140,7 +140,7 @@ try {
         throw new Exception('Trimite un mesaj, o imagine sau un diagnostic pentru a primi ajutor.');
     }
     
-    $isPremium = filter_var($input['is_premium'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $isPremiumRequest = filter_var($input['is_premium'] ?? false, FILTER_VALIDATE_BOOLEAN);
     
     if (!empty($deviceHash)) {
         validateDeviceHash($deviceHash);
@@ -169,7 +169,35 @@ try {
 
                 $referralReward = true;
             }
-        }        
+        }
+        // --- Daily Usage Limits ---
+        $usageStmt = $pdo->prepare("SELECT text_count, image_count, premium, premium_until FROM usage_tracking WHERE device_hash = ? AND date = CURDATE()");
+        $usageStmt->execute([$deviceHash]);
+        $usageData = $usageStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $isPremium = false;
+        if (!empty($usageData['premium']) && !empty($usageData['premium_until'])) {
+            $expiry = strtotime($usageData['premium_until']);
+            if ($expiry && $expiry > time()) {
+                $isPremium = true;
+            }
+        }
+        if ($isPremiumRequest) {
+            $isPremium = true;
+        }
+        $textLimit = $isPremium ? 10 : 3;
+        $imageLimit = $isPremium ? 3 : 1;
+        $textCount = (int)($usageData['text_count'] ?? 0);
+        $imageCount = (int)($usageData['image_count'] ?? 0);
+
+        if (!empty($imageBase64) && $imageCount >= $imageLimit) {
+            http_response_code(429);
+            sendResponse(false, null, 'Limita zilnică de imagini a fost depășită');
+        }
+        if (empty($imageBase64) && $textCount >= $textLimit) {
+            http_response_code(429);
+            sendResponse(false, null, 'Limita zilnică de întrebări text a fost depășită');
+        }
     }
 
      $rateId = $deviceHash ?: ($_SERVER['REMOTE_ADDR'] ?? 'guest');
