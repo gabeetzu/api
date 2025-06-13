@@ -9,7 +9,7 @@ header("X-Frame-Options: DENY");
 error_log("DB Host: " . getenv('DATABASE_HOST'));
 error_log("DB Name: " . getenv('DATABASE_NAME'));
 error_log("DB User: " . getenv('DATABASE_USER'));
-error_log("DB Pass: " . substr(getenv('DATABASE_PASS'), 0, 3) . '***');
+error_log("DB Pass: " . substr(getenv('DATABASE_PASSWORD'), 0, 3) . '***');
 
 set_error_handler(function ($errno, $errstr, $errfile, $errline) {
     $log = "[" . date('Y-m-d H:i:s') . "] PHP ERROR: $errstr in $errfile on line $errline\n";
@@ -17,23 +17,9 @@ set_error_handler(function ($errno, $errstr, $errfile, $errline) {
 });
 
 header('Content-Type: application/json; charset=utf-8');
-// Comprehensive CORS configuration for Netlify deployment
-$allowedOrigins = [
-    'https://creative-sunshine-d68104.netlify.app',
-    'https://localhost:3000',
-    'http://localhost:3000'
-];
-
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins)) {
-    header("Access-Control-Allow-Origin: $origin");
-} else {
-    header("Access-Control-Allow-Origin: *");
-}
-
-header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
-header("Access-Control-Allow-Credentials: true");
+header("Access-Control-Allow-Origin: https://creative-sunshine-d68104.netlify.app");
+header("Access-Control-Allow-Methods: POST");
+header("Access-Control-Allow-Headers: Content-Type");
 mb_internal_encoding("UTF-8");
 
 // Resource limits
@@ -61,8 +47,35 @@ $rawBody = file_get_contents('php://input');
 
 require_once __DIR__ . '/security.php';
 
+try {
+    $requiredVars = ['DATABASE_HOST', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD'];
+    foreach ($requiredVars as $var) {
+        if (empty(getenv($var))) {
+            throw new Exception("Missing required environment variable: $var");
+        }
+    }
+
+    $pdo = new PDO(
+        "mysql:host=" . getenv('DATABASE_HOST') . ";dbname=" . getenv('DATABASE_NAME') . ";charset=utf8mb4",
+        getenv('DATABASE_USER'),
+        getenv('DATABASE_PASSWORD'),
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]
+    );
+} catch (Exception $e) {
+    error_log("Error: " . $e->getMessage());
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Internal server error',
+        'timestamp' => date('Y-m-d H:i:s')
+    ]);
+    exit();
+}
+
 // Validate critical environment variables
-validateEnvironment();
 
 // Simple debug endpoint to verify API status
 if (isset($_GET['debug']) && $_GET['debug'] === 'test') {
@@ -87,16 +100,6 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'test') {
 //    http_response_code(401);
 //    echo jsonResponse(false, 'Acces neautorizat');
 //    exit();
-//}
-
-// --- Database Connection ---
-try {
-    $pdo = getDatabaseConnection();
-} catch (Exception $e) {
-    logEvent('DBError', $e->getMessage());
-    http_response_code(500);
-    sendResponse(false, null, 'Database connection failed');
-}
 
 // --- Request Signature Validation ---
 if (!validateRequestSignature($rawBody)) {
@@ -841,7 +844,6 @@ function getInputData($rawBody = null) {
 
 function validateEnvironment() {
     $required = ['OPENAI_API_KEY', 'DATABASE_HOST', 'DATABASE_NAME', 'DATABASE_USER', 'DATABASE_PASSWORD'];
-
     foreach ($required as $var) {
         if (empty($_ENV[$var]) && empty(getenv($var))) {
             throw new Exception("Missing required environment variable: $var");
