@@ -40,7 +40,8 @@ const UsageTracker = {
     total: 0,
     photo: 0,
     text: 0,
-    dailyLimit: 30,
+    textLimit: 3,
+    imageLimit: 1,
     isPremium: false,
     premiumUntil: null,
     deviceHash: null,
@@ -79,6 +80,8 @@ const UsageTracker = {
                     this.text = data.stats.text_count || 0;
                     this.isPremium = data.stats.premium === 1;
                     this.premiumUntil = data.stats.premium_until || null;
+                    this.textLimit = data.stats.text_limit || (this.isPremium ? 10 : 3);
+                    this.imageLimit = data.stats.image_limit || (this.isPremium ? 3 : 1);
                     
                     // Update UI
                     this.updateUI();
@@ -108,27 +111,33 @@ const UsageTracker = {
     updateUI() {
         const counter = document.getElementById('usage-counter');
         if (counter) {
-            counter.textContent = this.isPremium ? 
-                `Utilizări: ${this.total} (Nelimitat)` : 
-                `Utilizări: ${this.total}/${this.dailyLimit}`;
+            if (this.isPremium) {
+                counter.textContent = `Text: ${this.text}/${this.textLimit} | Foto: ${this.photo}/${this.imageLimit}`;
+            } else {
+                counter.textContent = `Text: ${this.text}/${this.textLimit} | Foto: ${this.photo}/${this.imageLimit}`;
+            }
         }
         
         const status = document.getElementById('premium-status');
         if (status) {
             if (this.isPremium) {
-                const formattedDate = new Date(this.premiumUntil)
-                    .toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' });
-                status.textContent = `Premium activ până la: ${formattedDate}`;
-                status.classList.add('premium-active');
+                status.textContent = 'Premium';
+                status.classList.add('premium-badge');
             } else {
                 status.textContent = '';
-                status.classList.remove('premium-active');
+                status.classList.remove('premium-badge');
             }
         }
     },
     
-    canMakeRequest() {
-        return this.isPremium || this.total < this.dailyLimit;
+    canMakeRequest(type) {
+        if (type === 'image') {
+            return this.photo < this.imageLimit;
+        }
+        if (type === 'text') {
+            return this.text < this.textLimit;
+        }
+        return (this.photo < this.imageLimit) || (this.text < this.textLimit);
     },
     
     incrementUsage(type) {
@@ -439,7 +448,7 @@ function handleUserMessage() {
     textInput.style.height = 'auto';
     toggleSendIcon();
     
-    if (!UsageTracker.canMakeRequest()) {
+    if (!UsageTracker.canMakeRequest('text')) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
         return;
     }
@@ -468,7 +477,7 @@ function handleImageUpload(files) {
         return;
     }
     
-    if (!UsageTracker.canMakeRequest()) {
+    if (!UsageTracker.canMakeRequest('image')) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
         return;
     }
@@ -720,6 +729,24 @@ function closeModal() {
     }
 }
 
+function showPremiumUpgrade() {
+    const benefits = `
+        <table class="premium-table">
+            <thead>
+                <tr><th></th><th>Free</th><th>Premium</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Întrebări text zilnice</td><td>3</td><td>10</td></tr>
+                <tr><td>Analize imagini zilnice</td><td>1</td><td>3</td></tr>
+                <tr><td>Fără reclame</td><td>❌</td><td>✅</td></tr>
+            </tbody>
+        </table>
+        <p style="margin-top:1rem;">Preț: <strong>4.99 RON/lună</strong> (disponibil curând pe Google Play)</p>
+        <button id="upgrade-btn" class="modal-close">OK</button>
+    `;
+    showModal('Upgrade Premium', benefits);
+}
+
 function openMenuModal(action) {
     switch(action) {
         case 'settings':
@@ -732,7 +759,7 @@ function openMenuModal(action) {
             showModal('Rețele Sociale', '<p>Urmărește-ne pe rețelele sociale.</p>');
             break;
         case 'premium':
-            showModal('Premium', '<p>Detalii despre versiunea Premium.</p>');
+            showPremiumUpgrade();
             break;
         case 'invite':
             showModal('Invită prieteni', '<p>Trimite codul tău de invitație.</p>');
