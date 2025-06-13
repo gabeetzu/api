@@ -6,6 +6,7 @@ const CACHE_NAME = 'gospod-app-v1.0.1';
 let lastQuestion = '';
 let lastImage = null;
 let deferredPrompt = null;
+let isProcessing = false;
 
 // Register service worker for PWA functionality
 if ('serviceWorker' in navigator) {
@@ -17,6 +18,13 @@ if ('serviceWorker' in navigator) {
         console.error('Service Worker registration failed:', error);
     });
 }
+
+// Handle PWA install prompt
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    showInstallPrompt();
+});
 
 // Generate a referral code on first load if one doesn't exist
 if (!localStorage.getItem('ref_code')) {
@@ -33,6 +41,7 @@ const UsageTracker = {
     dailyLimit: 30,
     isPremium: false,
     premiumUntil: null,
+    deviceHash: null,
     
     init() {
         // Get device hash or generate a new one
@@ -102,6 +111,25 @@ const UsageTracker = {
                 status.classList.remove('premium-active');
             }
         }
+    },
+    
+    canMakeRequest() {
+        return this.isPremium || this.total < this.dailyLimit;
+    },
+    
+    incrementUsage(type) {
+        if (type === 'text') {
+            this.text++;
+            this.total++;
+            localStorage.setItem('usage_text', this.text);
+        } else if (type === 'image') {
+            this.photo++;
+            this.total++;
+            localStorage.setItem('usage_photo', this.photo);
+        }
+        localStorage.setItem('usage_total', this.total);
+        this.updateUI();
+        Trophies.checkAll();
     }
 };
 
@@ -136,12 +164,8 @@ const Trophies = {
             unlocked.push(id);
             localStorage.setItem('trophies', JSON.stringify(unlocked));
             
-            const toast = document.createElement('div');
-            toast.className = 'toast trophy-toast';
-            toast.textContent = '🏆 Trofeu deblocat: ' + this.get(id).text;
-            document.getElementById('toast-container').appendChild(toast);
-            
-            setTimeout(() => toast.remove(), 4000);
+            showToast('🏆 Trofeu deblocat: ' + this.get(id).text, 'trophy');
+            this.render();
         }
     },
     
@@ -172,6 +196,271 @@ const Trophies = {
     }
 };
 
+// UI Management Functions
+function showWelcomeScreen() {
+    const welcomeSection = document.getElementById('welcome-section');
+    const chatSection = document.getElementById('chat-section');
+    
+    if (welcomeSection && chatSection) {
+        welcomeSection.style.display = 'block';
+        chatSection.style.display = 'none';
+    }
+}
+
+function showChatScreen() {
+    const welcomeSection = document.getElementById('welcome-section');
+    const chatSection = document.getElementById('chat-section');
+    
+    if (welcomeSection && chatSection) {
+        welcomeSection.style.display = 'none';
+        chatSection.style.display = 'block';
+    }
+}
+
+function saveUserName() {
+    const nameInput = document.getElementById('user-name');
+    if (nameInput && nameInput.value.trim()) {
+        const userName = nameInput.value.trim();
+        localStorage.setItem('user_name', userName);
+        
+        // Update referral code based on name
+        const refCode = (userName.replace(/\s+/g, '').toUpperCase().slice(0, 5) + Math.floor(Math.random() * 1000));
+        localStorage.setItem('ref_code', refCode);
+        updateReferralDisplay();
+        
+        showChatScreen();
+        showToast(`Bun venit, ${userName}!`, 'success');
+        
+        // Add welcome message to chat
+        addMessage(`Salut, ${userName}! Sunt asistentul tău pentru grădinărit. Poți să îmi pui întrebări despre plante sau să îmi trimiți poze cu problemele tale din grădină.`, 'bot');
+    }
+}
+
+function updateReferralDisplay() {
+    const refCode = localStorage.getItem('ref_code');
+    const refCodeElement = document.getElementById('ref-code');
+    if (refCodeElement && refCode) {
+        refCodeElement.textContent = refCode;
+    }
+}
+
+// Chat Functions
+function addMessage(text, sender, imageData = null) {
+    const chatMessages = document.getElementById('chat-messages');
+    if (!chatMessages) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}-message`;
+    
+    const messageText = document.createElement('div');
+    messageText.className = 'message-text';
+    
+    if (imageData && sender === 'user') {
+        const img = document.createElement('img');
+        img.src = imageData;
+        img.style.maxWidth = '200px';
+        img.style.borderRadius = '8px';
+        img.style.marginBottom = '0.5rem';
+        messageText.appendChild(img);
+        
+        if (text) {
+            const textNode = document.createElement('p');
+            textNode.textContent = text;
+            messageText.appendChild(textNode);
+        }
+    } else {
+        messageText.textContent = text;
+    }
+    
+    messageDiv.appendChild(messageText);
+    chatMessages.appendChild(messageDiv);
+    
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function showTypingIndicator() {
+    const chatMessages = document.getElementById('chat-messages');
+    if (!chatMessages) return;
+    
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message bot-message typing-indicator';
+    typingDiv.id = 'typing-indicator';
+    
+    const messageText = document.createElement('div');
+    messageText.className = 'message-text';
+    messageText.innerHTML = '<span class="typing-dots">Se gândește<span>.</span><span>.</span><span>.</span></span>';
+    
+    typingDiv.appendChild(messageText);
+    chatMessages.appendChild(typingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function hideTypingIndicator() {
+    const typingIndicator = document.getElementById('typing-indicator');
+    if (typingIndicator) {
+        typingIndicator.remove();
+    }
+}
+
+// Message Handling Functions
+function handleUserMessage() {
+    if (isProcessing) return;
+    
+    const textInput = document.getElementById('text-input');
+    if (!textInput || !textInput.value.trim()) return;
+    
+    const message = textInput.value.trim();
+    textInput.value = '';
+    
+    if (!UsageTracker.canMakeRequest()) {
+        showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
+        return;
+    }
+    
+    // Add user message to chat
+    addMessage(message, 'user');
+    lastQuestion = message;
+    
+    // Send to API
+    sendMessageToAPI(message, null);
+}
+
+function handleImageUpload(files) {
+    if (!files || files.length === 0 || isProcessing) return;
+    
+    const file = files[0];
+    if (!file.type.startsWith('image/')) {
+        showToast('Te rog să selectezi o imagine validă.', 'error');
+        return;
+    }
+    
+    if (!UsageTracker.canMakeRequest()) {
+        showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const imageData = e.target.result;
+        
+        // Add image message to chat
+        addMessage('', 'user', imageData);
+        lastImage = imageData;
+        
+        // Send to API
+        sendMessageToAPI('', imageData);
+    };
+    reader.readAsDataURL(file);
+}
+
+function sendMessageToAPI(message, imageData) {
+    isProcessing = true;
+    showTypingIndicator();
+    
+    const formData = new FormData();
+    formData.append('device_hash', UsageTracker.deviceHash);
+    
+    if (imageData) {
+        // Convert base64 to blob
+        const blob = dataURLtoBlob(imageData);
+        formData.append('image', blob, 'plant_image.jpg');
+        UsageTracker.incrementUsage('image');
+    } else {
+        formData.append('message', message);
+        UsageTracker.incrementUsage('text');
+    }
+    
+    fetch(`${BASE_URL}process-image.php`, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideTypingIndicator();
+        
+        if (data.success) {
+            addMessage(data.response, 'bot');
+        } else {
+            addMessage('Ne pare rău, a apărut o eroare. Te rog să încerci din nou.', 'bot');
+            console.error('API Error:', data.error);
+        }
+    })
+    .catch(error => {
+        hideTypingIndicator();
+        addMessage('Ne pare rău, nu te pot ajuta acum. Verifică conexiunea la internet și încearcă din nou.', 'bot');
+        console.error('Network Error:', error);
+    })
+    .finally(() => {
+        isProcessing = false;
+    });
+}
+
+// Utility Functions
+function dataURLtoBlob(dataURL) {
+    const arr = dataURL.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+}
+
+function showToast(message, type = 'info') {
+    const toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'trophy' ? 'trophy-toast' : ''}`;
+    toast.textContent = message;
+    
+    toastContainer.appendChild(toast);
+    
+    // Auto remove after 4 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.remove();
+        }
+    }, 4000);
+}
+
+function copyReferralCode() {
+    const refCode = localStorage.getItem('ref_code');
+    if (refCode) {
+        navigator.clipboard.writeText(refCode).then(() => {
+            showToast('Codul de referință a fost copiat!', 'success');
+        }).catch(() => {
+            showToast('Nu s-a putut copia codul. Încearcă din nou.', 'error');
+        });
+    }
+}
+
+function showInstallPrompt() {
+    if (deferredPrompt) {
+        const installBtn = document.createElement('button');
+        installBtn.textContent = '📱 Instalează aplicația';
+        installBtn.className = 'install-btn';
+        installBtn.onclick = () => {
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then((choiceResult) => {
+                if (choiceResult.outcome === 'accepted') {
+                    showToast('Aplicația a fost instalată!', 'success');
+                }
+                deferredPrompt = null;
+                installBtn.remove();
+            });
+        };
+        
+        const header = document.querySelector('.header-content');
+        if (header) {
+            header.appendChild(installBtn);
+        }
+    }
+}
+
 // Menu toggle functionality
 function setupEventListeners() {
     // Menu toggle
@@ -195,8 +484,11 @@ function setupEventListeners() {
         }
     });
     
-    // Additional event listeners for chat, images, etc.
+    // Setup chat listeners
     setupChatListeners();
+    
+    // Setup other UI listeners
+    setupUIListeners();
 }
 
 function setupChatListeners() {
@@ -210,7 +502,8 @@ function setupChatListeners() {
     const textInput = document.getElementById('text-input');
     if (textInput) {
         textInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
                 handleUserMessage();
             }
         });
@@ -231,9 +524,44 @@ function setupChatListeners() {
     }
 }
 
+function setupUIListeners() {
+    // Save name button
+    const saveNameBtn = document.getElementById('save-name');
+    if (saveNameBtn) {
+        saveNameBtn.addEventListener('click', saveUserName);
+    }
+    
+    // Name input enter key
+    const nameInput = document.getElementById('user-name');
+    if (nameInput) {
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                saveUserName();
+            }
+        });
+    }
+    
+    // Copy referral code button
+    const copyRefBtn = document.getElementById('copy-ref');
+    if (copyRefBtn) {
+        copyRefBtn.addEventListener('click', copyReferralCode);
+    }
+}
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize systems
     UsageTracker.init();
     Trophies.render();
     setupEventListeners();
+    updateReferralDisplay();
+    
+    // Check if user has a name saved
+    const savedName = localStorage.getItem('user_name');
+    if (savedName) {
+        showChatScreen();
+        addMessage(`Bun venit înapoi, ${savedName}! Cu ce te pot ajuta astăzi?`, 'bot');
+    } else {
+        showWelcomeScreen();
+    }
 });
