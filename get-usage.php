@@ -60,19 +60,23 @@ try {
         }
     }
     
-    // Prepare response
+    $textLimit = $isPremium ? 10 : 3;
+    $imageLimit = $isPremium ? 3 : 1;
+
     $response = [
         'success' => true,
         'stats' => [
-            'total_count' => (int)$stats['total_count'],
-            'text_count' => (int)$stats['text_count'],
-            'image_count' => (int)$stats['image_count'],
-            'premium' => $isPremium ? 1 : 0,
-            'premium_until' => $premiumUntil,
-            'user_name' => $stats['user_name'],
+            'total_count'    => (int)$stats['total_count'],
+            'text_count'     => (int)$stats['text_count'],
+            'image_count'    => (int)$stats['image_count'],
+            'premium'        => $isPremium ? 1 : 0,
+            'premium_until'  => $premiumUntil,
+            'user_name'      => $stats['user_name'],
             'referral_count' => (int)$referralData['referral_count'],
-            'daily_limit' => 30,
-            'can_make_request' => $isPremium || $stats['total_count'] < 30
+            'text_limit'     => $textLimit,
+            'image_limit'    => $imageLimit,
+            'can_make_text'  => $stats['text_count'] < $textLimit,
+            'can_make_image' => $stats['image_count'] < $imageLimit
         ],
         'timestamp' => date('Y-m-d H:i:s')
     ];
