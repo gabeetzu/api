@@ -1,4 +1,10 @@
 <?php
+
+// Security headers
+header("Content-Security-Policy: default-src 'self'");
+header("X-Content-Type-Options: nosniff");
+header("X-Frame-Options: DENY");
+
 // Add this to the top of process-image.php for debugging
 error_log("DB Host: " . getenv('DATABASE_HOST'));
 error_log("DB Name: " . getenv('DATABASE_NAME'));
@@ -40,6 +46,9 @@ ini_set('display_errors', 0); // Don't display to user
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/error.log');
 error_reporting(E_ALL);
+
+ini_set('pcre.jit', '0'); // Disable JIT for stability
+ini_set('opcache.enable', '1'); // Enable OpCache
 
 // --- CORS Preflight ---
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -108,8 +117,8 @@ try {
     if ($imageBase64 && strlen($imageBase64) > 3 * 1024 * 1024) {
         throw new Exception('Imaginea depășește 3MB.');
     }
-    if ($imageBase64 && !preg_match('/^[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
-        throw new Exception('Format imagine invalid.');
+    if ($imageBase64 && !preg_match('/^data:image\/(jpeg|png);base64,[A-Za-z0-9+\/=\s]+$/', $imageBase64)) {
+    throw new Exception('Format imagine invalid. Acceptă doar JPEG sau PNG.');
     }
    $plantLabel = '';
     $cnnConfidence = 0.0;
@@ -556,35 +565,39 @@ function trackUsage($deviceHash, $type) {
 
 function getDatabaseConnection() {
     static $pdo = null;
-
+    
     if ($pdo === null) {
         try {
+            // Add connection timeout
             $dsn = sprintf(
-                "mysql:host=%s;dbname=%s;charset=utf8mb4",
-                $_ENV['DATABASE_HOST'] ?? getenv('DATABASE_HOST'),
-                $_ENV['DATABASE_NAME'] ?? getenv('DATABASE_NAME')
+                "mysql:host=%s;dbname=%s;charset=utf8mb4;timeout=5",
+                getenv('DATABASE_HOST'),
+                getenv('DATABASE_NAME')
             );
-
+            
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_TIMEOUT => 5, // 5 second timeout
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::ATTR_PERSISTENT => false
+                PDO::ATTR_EMULATE_PREPARES => false
             ];
-
+            
             $pdo = new PDO(
                 $dsn,
-                $_ENV['DATABASE_USER'] ?? getenv('DATABASE_USER'),
-                $_ENV['DATABASE_PASSWORD'] ?? getenv('DATABASE_PASSWORD'),
+                getenv('DATABASE_USER'),
+                getenv('DATABASE_PASSWORD'),
                 $options
             );
-
+            
+            // Verify connection
+            $pdo->query("SELECT 1")->fetchColumn();
+            
         } catch (PDOException $e) {
             error_log("Database connection failed: " . $e->getMessage());
-            throw new Exception("Database connection failed");
+            throw new Exception("Database connection failed: Check credentials and network access");
         }
     }
-
+    
     return $pdo;
 }
 
@@ -650,48 +663,45 @@ function ensureUploadDirectory() {
 }
 
 function processImageUpload($base64 = null) {
-    $imageData = null;
-
-    // Handle file upload
-    if (isset($_FILES['image']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
-        $imageData = file_get_contents($_FILES['image']['tmp_name']);
-    }
-    // Handle base64 data
-    elseif ($base64 !== null || (isset($_POST['image']) && !empty($_POST['image']))) {
-        $source = $base64 !== null ? $base64 : $_POST['image'];
-        if (preg_match('/^data:image\/(\w+);base64,/', $source)) {
-            $data = preg_replace('#^data:image/\w+;base64,#i', '', $source);
-            $imageData = base64_decode($data, true);
-
-            if ($imageData === false) {
-                throw new Exception("Failed to decode base64 image data");
-            }
-        }
+    $maxSize = 3 * 1024 * 1024; // 3MB
+    
+    if ($base64 && strlen($base64) > $maxSize) {
+        throw new Exception("Imaginea depășește 3MB");
     }
 
-    if (!$imageData) {
-        throw new Exception("No valid image data received");
-    }
-
-    // Validate image
-    $imageInfo = getimagesizefromstring($imageData);
-    if ($imageInfo === false) {
-        throw new Exception("Invalid image file format");
-    }
-
-    // Save image
     $uploadDir = __DIR__ . '/uploads';
     if (!is_dir($uploadDir)) {
         if (!mkdir($uploadDir, 0755, true)) {
-            throw new Exception("Cannot create upload directory");
+            throw new Exception("Nu pot crea directorul pentru upload");
         }
     }
 
-    $filename = 'img_' . uniqid() . '.jpg';
+    $tempFile = tempnam(sys_get_temp_dir(), 'img_');
+    if ($base64) {
+        $data = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $base64));
+        if (file_put_contents($tempFile, $data) === false) {
+            throw new Exception("Eroare la salvarea temporară a imaginii");
+        }
+    }
+
+    $imageInfo = getimagesize($tempFile);
+    if (!$imageInfo) {
+        unlink($tempFile);
+        throw new Exception("Format imagine invalid");
+    }
+
+    $ext = match($imageInfo[2]) {
+        IMAGETYPE_JPEG => 'jpg',
+        IMAGETYPE_PNG => 'png',
+        default => throw new Exception("Format neacceptat. Folosește JPEG sau PNG")
+    };
+
+    $filename = 'img_' . uniqid() . '.' . $ext;
     $filePath = $uploadDir . '/' . $filename;
 
-    if (file_put_contents($filePath, $imageData) === false) {
-        throw new Exception("Failed to save image file");
+    if (!rename($tempFile, $filePath)) {
+        unlink($tempFile);
+        throw new Exception("Eroare la salvarea imaginii");
     }
 
     return $filePath;
@@ -711,7 +721,12 @@ function executeCNNAnalysis($imagePath) {
     if (!file_exists($modelPath)) {
         throw new Exception("CNN model file not found at: $modelPath");
     }
-
+    
+    error_log("CNN Command: " . $command);
+    error_log("CNN Working Directory: " . __DIR__);
+    error_log("Python Version: " . shell_exec('/opt/venv/bin/python3 --version 2>&1'));
+    error_log("File Permissions: " . decoct(fileperms($pythonScript)));
+    
     // Verify Python is available
     $pythonCheck = shell_exec('which python3 2>/dev/null');
     if (empty($pythonCheck)) {
@@ -720,11 +735,22 @@ function executeCNNAnalysis($imagePath) {
     
     // Execute with proper error capture
     $command = sprintf(
-        'cd %s && python3 %s %s 2>&1',
-        escapeshellarg(__DIR__),
-        escapeshellarg($pythonScript),
-        escapeshellarg($imagePath)
+    '/opt/venv/bin/python3 %s %s 2>&1',
+    escapeshellarg($pythonScript),
+    escapeshellarg($imagePath)
     );
+
+    // Verify Python virtual environment exists
+    if (!file_exists('/opt/venv/bin/python3')) {
+    throw new Exception("Python virtual environment not found");
+    }
+
+    // Test Python script execution
+    $testCmd = '/opt/venv/bin/python3 ' . escapeshellarg($pythonScript) . ' --test 2>&1';
+    $testOutput = shell_exec($testCmd);
+    if (strpos($testOutput, 'OK') === false) {
+    throw new Exception("CNN script test failed: " . $testOutput);
+    }
     
     error_log("Executing CNN command: $command");
     $output = shell_exec($command);
