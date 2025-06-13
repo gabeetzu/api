@@ -346,6 +346,26 @@ function hideTypingIndicator() {
     }
 }
 
+function autoResizeInput() {
+    const textInput = document.getElementById('text-input');
+    if (textInput) {
+        textInput.style.height = 'auto';
+        textInput.style.height = textInput.scrollHeight + 'px';
+    }
+}
+
+function toggleSendIcon() {
+    const textInput = document.getElementById('text-input');
+    const sendIcon = document.getElementById('send-icon');
+    if (textInput && sendIcon) {
+        if (textInput.value.trim().length > 0) {
+            sendIcon.textContent = '➤';
+        } else {
+            sendIcon.textContent = '🎤';
+        }
+    }
+}
+
 // Message Handling Functions
 function handleUserMessage() {
     if (isProcessing) {
@@ -367,6 +387,8 @@ function handleUserMessage() {
     
     const message = textInput.value.trim();
     textInput.value = '';
+    textInput.style.height = 'auto';
+    toggleSendIcon();
     
     if (!UsageTracker.canMakeRequest()) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
@@ -682,6 +704,12 @@ function setupChatListeners() {
                 handleUserMessage();
             }
         });
+        textInput.addEventListener('input', () => {
+            autoResizeInput();
+            toggleSendIcon();
+        });
+        autoResizeInput();
+        toggleSendIcon();
         console.log('Text input listener attached');
     } else {
         console.warn('Text input not found');
