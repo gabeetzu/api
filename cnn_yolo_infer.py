@@ -1,10 +1,21 @@
+import os
 from ultralytics import YOLO
 import sys
 import json
-from PIL import Image
 
-model = YOLO('api-PWAPP/best.pt')
+# Get directory of this script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Path to model weights
+model_path = os.path.join(script_dir, 'best.pt')
+
+# Load model
+model = YOLO(model_path)
+
+# Get image path from command line
 image_path = sys.argv[1]
+
+# Process image
 results = model.predict(image_path)
 
 # Extract top prediction
