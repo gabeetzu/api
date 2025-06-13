@@ -1,65 +1,29 @@
-import sys
-import json
-import traceback
-import os
-import cv2
-import torch
+import torch, sys, json, traceback, cv2, os
 from ultralytics import YOLO
 
-def main():
+torch.set_default_device('cpu')          # enforce CPU
+
+def jprint(obj):
+    print(json.dumps(obj))
+
     try:
-        # Force CPU usage (no GPU on Render.com)
-        torch.set_default_device('cpu')
-        
-        if len(sys.argv) != 2:
-            raise ValueError("Usage: python3 cnn_yolo_infer.py <image_path>")
-        
-        image_path = sys.argv[1]
-        print(json.dumps({"debug": f"Processing image: {image_path}"}), file=sys.stderr)
+    if len(sys.argv) != 2:
+        raise ValueError("arg <image_path> required")
 
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
+        img_path = sys.argv[1]
+    if not os.path.exists(img_path):
+        raise FileNotFoundError(img_path)
 
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError("OpenCV failed to read the image")
+img = cv2.imread(img_path)
+    if img is None:
+        raise ValueError("OpenCV failed")
 
-        print(json.dumps({"debug": f"Image dimensions: {img.shape}"}), file=sys.stderr)
-        
-        # Load model with explicit CPU device
-        model = YOLO("best.pt")
-        model.to('cpu')  # Ensure CPU usage
-        
-        # Run inference on CPU
-        results = model.predict(img, device='cpu', verbose=False)
-        
-        if not results or len(results) == 0:
-            raise ValueError("No inference results")
-        
-        # Extract results
-        result = results[0]
-        if hasattr(result, 'probs') and result.probs is not None:
-            top = result.names[result.probs.top1]
-            conf = float(result.probs.top1conf)
-        else:
-            # Fallback for detection models
-            if len(result.boxes) > 0:
-                top_idx = result.boxes.conf.argmax()
-                top = result.names[int(result.boxes.cls[top_idx])]
-                conf = float(result.boxes.conf[top_idx])
-            else:
-                top = "unknown"
-                conf = 0.0
-        
-        print(json.dumps({"label": top, "confidence": conf}))
-        
-    except Exception as e:
-        error_msg = {
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
-        print(json.dumps(error_msg), file=sys.stderr)
-        sys.exit(1)
+    model = YOLO('best.pt')
+    res   = model.predict(img, device='cpu', verbose=False)
+    top   = res[0].names[res[0].probs.top1] if res and res[0].probs else "unknown"
+    conf  = float(res[0].probs.top1conf)    if res and res[0].probs else 0.0
+    jprint({"label": top, "confidence": conf})
 
-if __name__ == "__main__":
-    main()
+except Exception as e:
+    jprint({"error": str(e), "trace": traceback.format_exc()})
+    sys.exit(1)
