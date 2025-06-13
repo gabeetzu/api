@@ -70,9 +70,13 @@ if ('serviceWorker' in navigator) {
 
 // Handle PWA install prompt
 window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    showInstallPrompt();
+  e.preventDefault();
+  deferredPrompt = e;
+  const installBtn = document.createElement('button');
+  installBtn.textContent = 'Install App';
+  installBtn.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 1000;';
+  installBtn.onclick = () => deferredPrompt.prompt();
+  document.body.appendChild(installBtn);
 });
 
 // Generate a referral code on first load if one doesn't exist
