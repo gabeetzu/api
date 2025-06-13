@@ -112,45 +112,48 @@ const UsageTracker = {
     
     fetchUsageData() {
         console.log('Fetching usage data for device:', this.deviceHash);
-        fetch(`${BASE_URL}get-usage.php?hash=${this.deviceHash}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
+        fetch(`${BASE_URL}get-usage.php?hash=${this.deviceHash}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.text();
+        })
+        .then(text => {
+            console.log('Usage API raw response:', text);
+
+            try {
+                const data = JSON.parse(text);
                 console.log('Usage data received:', data);
+
                 if (data.success) {
                     this.total = data.stats.total_count || 0;
                     this.photo = data.stats.image_count || 0;
                     this.text = data.stats.text_count || 0;
                     this.isPremium = data.stats.premium === 1;
                     this.premiumUntil = data.stats.premium_until || null;
-                    this.textLimit = data.stats.text_limit || (this.isPremium ? 10 : 3);
-                    this.imageLimit = data.stats.image_limit || (this.isPremium ? 3 : 1);
 
-                    const prevPremium = localStorage.getItem('is_premium') === 'true';
-                    localStorage.setItem('is_premium', this.isPremium);
-                    if (!prevPremium && this.isPremium) {
-                        Analytics.logEvent('premium_conversion');
-                    }
-                    
-                    // Update UI
                     this.updateUI();
-                    
-                    // Check for trophies
                     Trophies.checkAll();
                 } else {
-                    console.error('API returned error:', data.error);
+                    console.error('Usage API returned error:', data.error);
                     this.loadLocalData();
                 }
-            })
-            .catch(error => {
-                console.error('Failed to fetch usage data', error);
-                // Fallback to local data
+            } catch (parseError) {
+                console.error('Failed to parse usage data JSON:', parseError);
+                console.error('Response text:', text);
                 this.loadLocalData();
-            });
+            }
+        })
+        .catch(error => {
+            console.error('Failed to fetch usage data', error);
+            this.loadLocalData();
+        });
     },
     
     loadLocalData() {
@@ -559,14 +562,18 @@ function handleImageUpload(files) {
 }
 
 function sendMessageToAPI(message, imageData) {
+    if (isProcessing) {
+        console.log('Already processing, ignoring request');
+        return;
+    }
+
     isProcessing = true;
     showTypingIndicator();
-    
+
     const formData = new FormData();
     formData.append('device_hash', UsageTracker.deviceHash);
-    
+
     if (imageData) {
-        // Convert base64 to blob
         try {
             const blob = dataURLtoBlob(imageData);
             formData.append('image', blob, 'plant_image.jpg');
@@ -584,56 +591,69 @@ function sendMessageToAPI(message, imageData) {
         UsageTracker.incrementUsage('text');
         console.log('Sending text message to API:', message);
     }
-    
+
     fetch(`${BASE_URL}process-image.php`, {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: {
+            // Don't set Content-Type for FormData - browser sets it automatically
+        }
     })
     .then(response => {
         console.log('Response status:', response.status);
+        console.log('Response headers:', [...response.headers.entries()]);
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
+
         return response.text();
     })
     .then(text => {
-        console.log('Raw response:', text);
+        console.log('Raw response text:', text);
+
+        let data;
         try {
-            const data = JSON.parse(text);
-            console.log('Parsed response:', data);
-
-            hideTypingIndicator();
-
-            if (data.success) {
-                const responseText = handleAPIResponse(data.response);
-                addMessage(responseText, 'bot');
-            } else {
-                const errorMsg = data.error || 'A apărut o eroare necunoscută.';
-                addMessage(`Ne pare rău, ${errorMsg}`, 'bot');
-                console.error('API Error:', data.error);
-            }
+            data = JSON.parse(text);
         } catch (parseError) {
             console.error('JSON Parse Error:', parseError);
-            console.error('Response text:', text);
-            addMessage('Eroare la procesarea răspunsului. Te rog să încerci din nou.', 'bot');
+            console.error('Response text that failed to parse:', text);
+            throw new Error('Server returned invalid response format');
+        }
+
+        console.log('Parsed response data:', data);
+        hideTypingIndicator();
+
+        if (data.success && data.response) {
+            const responseText = typeof data.response === 'string'
+                ? data.response
+                : JSON.stringify(data.response);
+
+            addMessage(responseText, 'bot');
+        } else {
+            const errorMsg = data.error || 'A apărut o eroare necunoscută.';
+            addMessage(`Ne pare rău, ${errorMsg}`, 'bot');
+            console.error('API Error:', data.error);
         }
     })
     .catch(error => {
         hideTypingIndicator();
-        console.error('Network Error:', error);
+        console.error('API Communication Error:', error);
 
         if (error.message.includes('Failed to fetch')) {
             addMessage('Nu pot să mă conectez la server. Verifică conexiunea la internet și încearcă din nou.', 'bot');
-        } else if (error.message.includes('HTTP error! status: 413')) {
+        } else if (error.message.includes('CORS')) {
+            addMessage('Eroare de configurare server. Te rog să contactezi suportul.', 'bot');
+        } else if (error.message.includes('413')) {
             addMessage('Imaginea este prea mare. Te rog să folosești o imagine mai mică.', 'bot');
+        } else if (error.message.includes('500')) {
+            addMessage('Serverul întâmpină probleme temporare. Te rog să încerci din nou în câteva minute.', 'bot');
         } else {
-            addMessage('Ne pare rău, nu te putem ajuta acum. Te rog să încerci din nou mai târziu.', 'bot');
+            addMessage('Ne pare rău, nu te pot ajuta acum. Te rog să încerci din nou mai târziu.', 'bot');
         }
     })
     .finally(() => {
         isProcessing = false;
-        Analytics.logEvent('request', {type: imageData ? 'image' : 'text'});
-        AdManager.recordRequest();
     });
 }
 
