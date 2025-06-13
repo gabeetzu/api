@@ -711,50 +711,30 @@ function processImageUpload($base64 = null) {
 }
 
 function executeCNNAnalysis($imagePath) {
-    // Use absolute path to Python script in same directory
     $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
     
-    // Verify script exists
     if (!file_exists($pythonScript)) {
         throw new Exception("CNN script not found at: $pythonScript");
     }
 
-    // Verify model file exists
     $modelPath = __DIR__ . '/best.pt';
     if (!file_exists($modelPath)) {
         throw new Exception("CNN model file not found at: $modelPath");
     }
-    
-    error_log("CNN Command: " . $command);
-    error_log("CNN Working Directory: " . __DIR__);
-    error_log("Python Version: " . shell_exec('/opt/venv/bin/python3 --version 2>&1'));
-    error_log("File Permissions: " . decoct(fileperms($pythonScript)));
-    
-    // Verify Python is available
-    $pythonCheck = shell_exec('which python3 2>/dev/null');
-    if (empty($pythonCheck)) {
-        throw new Exception("Python3 not found on server");
-    }
-    
-    // Execute with proper error capture
-    $command = sprintf(
-        '/opt/venv/bin/python3 %s %s 2>&1',
-        escapeshellarg($pythonScript),
-        escapeshellarg($imagePath)
-    );
 
-    error_log("CNN Command: $command");
-    
-    // Verify Python virtual environment exists
-    if (!file_exists('/opt/venv/bin/python3')) {
-    throw new Exception("Python virtual environment not found");
-    }
+    $command = '/opt/venv/bin/python3 ' .
+               escapeshellarg($pythonScript) . ' ' .
+               escapeshellarg($imagePath) . ' 2>&1';
 
-    // Test Python script execution
-    $testCmd = '/opt/venv/bin/python3 ' . escapeshellarg($pythonScript) . ' --test 2>&1';
-    $testOutput = shell_exec($testCmd);
-    if (strpos($testOutput, 'OK') === false) {
-    throw new Exception("CNN script test failed: " . $testOutput);
+    exec($command, $output, $return_code);
+    $pythonOutput = implode("\n", $output);
+
+    error_log("Python Command: " . $command);
+    error_log("Python Exit Code: " . $return_code);
+    error_log("Python Output: " . $pythonOutput);
+
+    if ($return_code !== 0) {
+        throw new Exception("CNN analysis failed: " . $pythonOutput);
     }
     
     error_log("Executing CNN command: $command");
@@ -765,13 +745,9 @@ function executeCNNAnalysis($imagePath) {
         throw new Exception("CNN script produced no output");
     }
     
-    // Parse JSON output
-    $result = json_decode($output, true);
+    $result = json_decode($pythonOutput, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception("CNN script returned invalid JSON: $output");
-    }
-    if (isset($result['error'])) {
-        throw new Exception('CNN error: ' . $result['error']);
+        throw new Exception("Invalid JSON from Python: " . $pythonOutput);
     }
     
     return $result;
