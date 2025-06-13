@@ -44,6 +44,7 @@ const UsageTracker = {
     deviceHash: null,
     
     init() {
+        console.log('Initializing UsageTracker...');
         // Get device hash or generate a new one
         this.deviceHash = localStorage.getItem('device_hash') || this.generateDeviceHash();
         if (!localStorage.getItem('device_hash')) {
@@ -60,9 +61,16 @@ const UsageTracker = {
     },
     
     fetchUsageData() {
+        console.log('Fetching usage data for device:', this.deviceHash);
         fetch(`${BASE_URL}get-usage.php?hash=${this.deviceHash}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                console.log('Usage data received:', data);
                 if (data.success) {
                     this.total = data.stats.total_count || 0;
                     this.photo = data.stats.image_count || 0;
@@ -75,6 +83,9 @@ const UsageTracker = {
                     
                     // Check for trophies
                     Trophies.checkAll();
+                } else {
+                    console.error('API returned error:', data.error);
+                    this.loadLocalData();
                 }
             })
             .catch(error => {
@@ -85,6 +96,7 @@ const UsageTracker = {
     },
     
     loadLocalData() {
+        console.log('Loading local usage data...');
         this.total = parseInt(localStorage.getItem('usage_total') || 0);
         this.photo = parseInt(localStorage.getItem('usage_photo') || 0);
         this.text = parseInt(localStorage.getItem('usage_text') || 0);
@@ -198,29 +210,46 @@ const Trophies = {
 
 // UI Management Functions
 function showWelcomeScreen() {
+    console.log('Showing welcome screen...');
     const welcomeSection = document.getElementById('welcome-section');
     const chatSection = document.getElementById('chat-section');
     
     if (welcomeSection && chatSection) {
         welcomeSection.style.display = 'block';
         chatSection.style.display = 'none';
+        console.log('Welcome screen displayed');
+    } else {
+        console.error('Welcome or chat section elements not found');
     }
 }
 
 function showChatScreen() {
+    console.log('Showing chat screen...');
     const welcomeSection = document.getElementById('welcome-section');
     const chatSection = document.getElementById('chat-section');
     
     if (welcomeSection && chatSection) {
         welcomeSection.style.display = 'none';
         chatSection.style.display = 'block';
+        console.log('Chat screen displayed');
+    } else {
+        console.error('Welcome or chat section elements not found');
     }
 }
 
 function saveUserName() {
+    console.log('saveUserName function called');
     const nameInput = document.getElementById('user-name');
+    
+    if (!nameInput) {
+        console.error('Name input element not found');
+        showToast('Eroare: câmpul pentru nume nu a fost găsit.', 'error');
+        return;
+    }
+    
     if (nameInput && nameInput.value.trim()) {
         const userName = nameInput.value.trim();
+        console.log('Saving user name:', userName);
         localStorage.setItem('user_name', userName);
         
         // Update referral code based on name
@@ -232,7 +261,13 @@ function saveUserName() {
         showToast(`Bun venit, ${userName}!`, 'success');
         
         // Add welcome message to chat
-        addMessage(`Salut, ${userName}! Sunt asistentul tău pentru grădinărit. Poți să îmi pui întrebări despre plante sau să îmi trimiți poze cu problemele tale din grădină.`, 'bot');
+        setTimeout(() => {
+            addMessage(`Salut, ${userName}! Sunt asistentul tău pentru grădinărit. Poți să îmi pui întrebări despre plante sau să îmi trimiți poze cu problemele tale din grădină.`, 'bot');
+        }, 500);
+    } else {
+        console.log('Name input is empty');
+        showToast('Te rog să introduci numele tău.', 'error');
+        nameInput.focus();
     }
 }
 
@@ -241,13 +276,17 @@ function updateReferralDisplay() {
     const refCodeElement = document.getElementById('ref-code');
     if (refCodeElement && refCode) {
         refCodeElement.textContent = refCode;
+        console.log('Referral code updated:', refCode);
     }
 }
 
 // Chat Functions
 function addMessage(text, sender, imageData = null) {
     const chatMessages = document.getElementById('chat-messages');
-    if (!chatMessages) return;
+    if (!chatMessages) {
+        console.error('Chat messages container not found');
+        return;
+    }
     
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${sender}-message`;
@@ -277,11 +316,15 @@ function addMessage(text, sender, imageData = null) {
     
     // Scroll to bottom
     chatMessages.scrollTop = chatMessages.scrollHeight;
+    console.log('Message added:', text.substring(0, 50) + '...');
 }
 
 function showTypingIndicator() {
     const chatMessages = document.getElementById('chat-messages');
     if (!chatMessages) return;
+    
+    // Remove existing typing indicator if any
+    hideTypingIndicator();
     
     const typingDiv = document.createElement('div');
     typingDiv.className = 'message bot-message typing-indicator';
@@ -305,10 +348,22 @@ function hideTypingIndicator() {
 
 // Message Handling Functions
 function handleUserMessage() {
-    if (isProcessing) return;
+    if (isProcessing) {
+        console.log('Already processing, ignoring request');
+        return;
+    }
     
     const textInput = document.getElementById('text-input');
-    if (!textInput || !textInput.value.trim()) return;
+    if (!textInput) {
+        console.error('Text input element not found');
+        return;
+    }
+    
+    if (!textInput.value.trim()) {
+        console.log('Text input is empty');
+        showToast('Te rog să introduci o întrebare.', 'error');
+        return;
+    }
     
     const message = textInput.value.trim();
     textInput.value = '';
@@ -317,6 +372,8 @@ function handleUserMessage() {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
         return;
     }
+    
+    console.log('Handling user message:', message);
     
     // Add user message to chat
     addMessage(message, 'user');
@@ -335,10 +392,17 @@ function handleImageUpload(files) {
         return;
     }
     
+    if (file.size > 3 * 1024 * 1024) { // 3MB limit
+        showToast('Imaginea este prea mare. Te rog să selectezi o imagine mai mică de 3MB.', 'error');
+        return;
+    }
+    
     if (!UsageTracker.canMakeRequest()) {
         showToast('Ai atins limita zilnică de utilizări. Încearcă mâine sau fă upgrade la Premium!', 'error');
         return;
     }
+    
+    console.log('Handling image upload:', file.name, file.size);
     
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -350,6 +414,9 @@ function handleImageUpload(files) {
         
         // Send to API
         sendMessageToAPI('', imageData);
+    };
+    reader.onerror = function() {
+        showToast('Eroare la citirea imaginii. Te rog să încerci din nou.', 'error');
     };
     reader.readAsDataURL(file);
 }
@@ -363,21 +430,37 @@ function sendMessageToAPI(message, imageData) {
     
     if (imageData) {
         // Convert base64 to blob
-        const blob = dataURLtoBlob(imageData);
-        formData.append('image', blob, 'plant_image.jpg');
-        UsageTracker.incrementUsage('image');
+        try {
+            const blob = dataURLtoBlob(imageData);
+            formData.append('image', blob, 'plant_image.jpg');
+            UsageTracker.incrementUsage('image');
+            console.log('Sending image to API...');
+        } catch (error) {
+            console.error('Error converting image:', error);
+            hideTypingIndicator();
+            addMessage('Eroare la procesarea imaginii. Te rog să încerci din nou.', 'bot');
+            isProcessing = false;
+            return;
+        }
     } else {
         formData.append('message', message);
         UsageTracker.incrementUsage('text');
+        console.log('Sending text message to API:', message);
     }
     
     fetch(`${BASE_URL}process-image.php`, {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         hideTypingIndicator();
+        console.log('API response received:', data);
         
         if (data.success) {
             addMessage(data.response, 'bot');
@@ -388,8 +471,13 @@ function sendMessageToAPI(message, imageData) {
     })
     .catch(error => {
         hideTypingIndicator();
-        addMessage('Ne pare rău, nu te pot ajuta acum. Verifică conexiunea la internet și încearcă din nou.', 'bot');
         console.error('Network Error:', error);
+        
+        if (error.message.includes('Failed to fetch')) {
+            addMessage('Nu pot să mă conectez la server. Verifică conexiunea la internet și încearcă din nou.', 'bot');
+        } else {
+            addMessage('Ne pare rău, nu te pot ajuta acum. Te rog să încerci din nou mai târziu.', 'bot');
+        }
     })
     .finally(() => {
         isProcessing = false;
@@ -411,7 +499,10 @@ function dataURLtoBlob(dataURL) {
 
 function showToast(message, type = 'info') {
     const toastContainer = document.getElementById('toast-container');
-    if (!toastContainer) return;
+    if (!toastContainer) {
+        console.log('Toast:', message);
+        return;
+    }
     
     const toast = document.createElement('div');
     toast.className = `toast ${type === 'trophy' ? 'trophy-toast' : ''}`;
@@ -430,12 +521,41 @@ function showToast(message, type = 'info') {
 function copyReferralCode() {
     const refCode = localStorage.getItem('ref_code');
     if (refCode) {
-        navigator.clipboard.writeText(refCode).then(() => {
-            showToast('Codul de referință a fost copiat!', 'success');
-        }).catch(() => {
-            showToast('Nu s-a putut copia codul. Încearcă din nou.', 'error');
-        });
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(refCode).then(() => {
+                showToast('Codul de referință a fost copiat!', 'success');
+            }).catch(() => {
+                fallbackCopyTextToClipboard(refCode);
+            });
+        } else {
+            fallbackCopyTextToClipboard(refCode);
+        }
     }
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            showToast('Codul de referință a fost copiat!', 'success');
+        } else {
+            showToast('Nu s-a putut copia codul. Încearcă din nou.', 'error');
+        }
+    } catch (err) {
+        showToast('Nu s-a putut copia codul. Încearcă din nou.', 'error');
+    }
+
+    document.body.removeChild(textArea);
 }
 
 function showInstallPrompt() {
@@ -443,6 +563,17 @@ function showInstallPrompt() {
         const installBtn = document.createElement('button');
         installBtn.textContent = '📱 Instalează aplicația';
         installBtn.className = 'install-btn';
+        installBtn.style.cssText = `
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-left: 1rem;
+        `;
+        
         installBtn.onclick = () => {
             deferredPrompt.prompt();
             deferredPrompt.userChoice.then((choiceResult) => {
@@ -463,6 +594,8 @@ function showInstallPrompt() {
 
 // Menu toggle functionality
 function setupEventListeners() {
+    console.log('Setting up event listeners...');
+    
     // Menu toggle
     const navToggle = document.getElementById('nav-toggle');
     const navMenu = document.getElementById('nav-menu');
@@ -471,7 +604,11 @@ function setupEventListeners() {
         navToggle.addEventListener('click', () => {
             navToggle.classList.toggle('active');
             navMenu.classList.toggle('active');
+            console.log('Menu toggled');
         });
+        console.log('Menu toggle listeners attached');
+    } else {
+        console.warn('Menu toggle elements not found');
     }
     
     // Close menu when clicking outside
@@ -492,10 +629,15 @@ function setupEventListeners() {
 }
 
 function setupChatListeners() {
+    console.log('Setting up chat listeners...');
+    
     // Send message button
     const sendBtn = document.getElementById('send-btn');
     if (sendBtn) {
         sendBtn.addEventListener('click', handleUserMessage);
+        console.log('Send button listener attached');
+    } else {
+        console.warn('Send button not found');
     }
     
     // Text input enter key
@@ -507,6 +649,9 @@ function setupChatListeners() {
                 handleUserMessage();
             }
         });
+        console.log('Text input listener attached');
+    } else {
+        console.warn('Text input not found');
     }
     
     // Image upload functionality
@@ -521,14 +666,22 @@ function setupChatListeners() {
         imageInput.addEventListener('change', (e) => {
             handleImageUpload(e.target.files);
         });
+        console.log('Image upload listeners attached');
+    } else {
+        console.warn('Image upload elements not found');
     }
 }
 
 function setupUIListeners() {
+    console.log('Setting up UI listeners...');
+    
     // Save name button
     const saveNameBtn = document.getElementById('save-name');
     if (saveNameBtn) {
         saveNameBtn.addEventListener('click', saveUserName);
+        console.log('Save name button listener attached');
+    } else {
+        console.warn('Save name button not found');
     }
     
     // Name input enter key
@@ -539,29 +692,65 @@ function setupUIListeners() {
                 saveUserName();
             }
         });
+        console.log('Name input listener attached');
+    } else {
+        console.warn('Name input not found');
     }
     
     // Copy referral code button
     const copyRefBtn = document.getElementById('copy-ref');
     if (copyRefBtn) {
         copyRefBtn.addEventListener('click', copyReferralCode);
+        console.log('Copy referral button listener attached');
+    } else {
+        console.warn('Copy referral button not found');
     }
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize systems
-    UsageTracker.init();
-    Trophies.render();
-    setupEventListeners();
-    updateReferralDisplay();
+    console.log('DOM Content Loaded - Initializing GospodApp...');
     
-    // Check if user has a name saved
-    const savedName = localStorage.getItem('user_name');
-    if (savedName) {
-        showChatScreen();
-        addMessage(`Bun venit înapoi, ${savedName}! Cu ce te pot ajuta astăzi?`, 'bot');
-    } else {
-        showWelcomeScreen();
-    }
+    // Small delay to ensure all elements are rendered
+    setTimeout(() => {
+        // Initialize systems
+        UsageTracker.init();
+        Trophies.render();
+        setupEventListeners();
+        updateReferralDisplay();
+        
+        // Check if user has a name saved
+        const savedName = localStorage.getItem('user_name');
+        if (savedName) {
+            console.log('Existing user detected:', savedName);
+            showChatScreen();
+            setTimeout(() => {
+                addMessage(`Bun venit înapoi, ${savedName}! Cu ce te pot ajuta astăzi?`, 'bot');
+            }, 1000);
+        } else {
+            console.log('New user - showing welcome screen');
+            showWelcomeScreen();
+        }
+        
+        console.log('GospodApp initialization complete');
+    }, 100);
 });
+
+// Debug function to check element existence
+function debugElements() {
+    const elements = [
+        'save-name', 'user-name', 'send-btn', 'text-input', 
+        'image-btn', 'image-input', 'nav-toggle', 'nav-menu',
+        'welcome-section', 'chat-section', 'usage-counter',
+        'premium-status', 'trophies', 'ref-code', 'copy-ref'
+    ];
+    
+    console.log('Element Debug Check:');
+    elements.forEach(id => {
+        const element = document.getElementById(id);
+        console.log(`${id}: ${element ? 'Found' : 'NOT FOUND'}`);
+    });
+}
+
+// Expose debug function to global scope for testing
+window.debugElements = debugElements;
