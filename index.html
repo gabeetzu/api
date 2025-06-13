@@ -13,7 +13,7 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="style.css">
     
     <style>
         /* Critical CSS for immediate rendering */
@@ -72,7 +72,7 @@
                                 <li><a href="#help" class="nav-link">Ajutor</a></li>
                             </ul>
                             
-                            <button class="nav-toggle" id="nav-toggle" aria-label="Deschide meniul">
+                            <button class="nav-toggle" id="nav-toggle" aria-label="Deschide meniul" type="button">
                                 <span class="hamburger-line"></span>
                                 <span class="hamburger-line"></span>
                                 <span class="hamburger-line"></span>
@@ -94,7 +94,7 @@
                             <div class="name-input-section">
                                 <label for="user-name">Cum te cheamă?</label>
                                 <input type="text" id="user-name" placeholder="Introdu numele tău..." autocomplete="name">
-                                <button id="save-name" type="button">Salvează</button>
+                                <button id="save-name" type="button" aria-label="Salvează numele">Salvează</button>
                             </div>
                         </div>
                     </section>
@@ -137,7 +137,7 @@
                                 <p>Codul tău de referință:</p>
                                 <div class="referral-code">
                                     <span id="ref-code"></span>
-                                    <button id="copy-ref" type="button">Copiază</button>
+                                    <button id="copy-ref" type="button" aria-label="Copiază codul de referință">Copiază</button>
                                 </div>
                             </div>
                         </div>
