@@ -1,24 +1,12 @@
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open('gospod-v6').then(async cache => {
-      for (const asset of ['/', '/index.html','/main.js','/styles.css']) {
-        try { await cache.add(asset); }
-        catch(err){ console.warn('Skip cache', asset, err); }
-      }
-    }).then(()=>self.skipWaiting())
-  );
-});
+const CACHE='gospod-v6';
+const ASSETS=['/','/index.html','/main.js','/styles.css'];
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.map(k => k !== 'gospod-v6' ? caches.delete(k) : null))
-    ).then(()=>clients.claim())
-  );
+self.addEventListener('install',e=>{
+  e.waitUntil(caches.open(CACHE).then(c=>Promise.all(
+     ASSETS.map(a=>c.add(a).catch(()=>{}))
+  )));
+  self.skipWaiting();
 });
-
-self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
-  );
+self.addEventListener('fetch',e=>{
+  e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)));
 });
