@@ -1,5 +1,5 @@
 const CACHE='gospod-v6';
-const ASSETS=['/','/index.html','/main.js','/styles.css'];
+const ASSETS=['/','/index.html','/main.js','/style.css'];
 
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>Promise.all(
