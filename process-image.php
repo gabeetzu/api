@@ -666,7 +666,7 @@ function sendErrorResponse($errorMessage, $errorCode = 500) {
 }
 
 function ensureUploadDirectory() {
-    $uploadDir = __DIR__ . '/uploads';
+    $uploadDir = '/data/uploads';
     if (!is_dir($uploadDir)) {
         if (!mkdir($uploadDir, 0755, true)) {
             panic('Cannot create upload directory', ["line" => __LINE__]);
@@ -680,16 +680,16 @@ function ensureUploadDirectory() {
 
 function processImageUpload($base64 = null) {
     $maxSize = 3 * 1024 * 1024; // 3MB
-    
-    if ($base64 && strlen($base64) > $maxSize) {
-        panic("Imaginea depășește 3MB", ["line" => __LINE__]);
-    }
+    $uploadDir = '/data/uploads';
 
-    $uploadDir = __DIR__ . '/uploads';
     if (!is_dir($uploadDir)) {
         if (!mkdir($uploadDir, 0755, true)) {
-            throw new Exception("Nu pot crea directorul pentru upload");
+            panic("Nu pot crea directorul pentru upload", ["line" => __LINE__]);
         }
+    }
+
+    if (!is_writable($uploadDir)) {
+        panic("Directorul nu este inscriptibil: $uploadDir", ["line" => __LINE__]);
     }
 
     $tempFile = tempnam(sys_get_temp_dir(), 'img_');
@@ -717,40 +717,40 @@ function processImageUpload($base64 = null) {
 
     if (!rename($tempFile, $filePath)) {
         unlink($tempFile);
-        panic("Eroare la salvarea imaginii", ["line" => __LINE__]);
+        panic("Eroare la salvarea imaginii finale", ["line" => __LINE__]);
     }
 
     return $filePath;
 }
 
 function executeCNNAnalysis($imagePath) {
-    $pythonScript = __DIR__ . '/cnn_yolo_infer.py';
-    
+    $pythonScript = '/data/cnn_yolo_infer.py';
+    $modelPath = '/data/best.pt';
+
     if (!file_exists($pythonScript)) {
-        panic("CNN script not found at: $pythonScript", ["line" => __LINE__]);
+        panic("CNN script not found: $pythonScript", ["line" => __LINE__]);
     }
 
-    $modelPath = __DIR__ . '/best.pt';
     if (!file_exists($modelPath)) {
-        throw new Exception("CNN model file not found at: $modelPath");
+        panic("CNN model missing: $modelPath", ["line" => __LINE__]);
     }
 
-    $cmd = '/opt/venv/bin/python3 ' . escapeshellarg(__DIR__.'/cnn_yolo_infer.py')
-           .' '.escapeshellarg($imagePath).' 2>&1';
+    $cmd = '/opt/venv/bin/python3 ' . escapeshellarg($pythonScript)
+         . ' ' . escapeshellarg($imagePath) . ' 2>&1';
 
     exec($cmd, $pyOut, $code);
-    $errorBlob = implode("\n", $pyOut);
-    error_log("[PYTHON] exit=$code\n$errorBlob");
+    $output = implode("\n", $pyOut);
+    error_log("[PYTHON] Exit=$code\n$output");
 
     if ($code !== 0) {
-        panic('CNN script failed', ['exit' => $code]);
+        panic("CNN script failed", ['exit_code' => $code, 'output' => $output]);
     }
 
-    $result = json_decode($errorBlob, true);
+    $result = json_decode($output, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        panic('Bad JSON from CNN', ['raw' => $errorBlob]);
+        panic("CNN JSON parse error", ['output' => $output]);
     }
-    
+
     return $result;
 }
 
