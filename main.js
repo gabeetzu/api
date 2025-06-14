@@ -1,6 +1,6 @@
 const APP_VERSION = '1.0.1';
 const BASE_URL = 'https://gabeetzu-project.onrender.com/';
-const CACHE_NAME = 'gospod-app-v1.0.1';
+const CACHE_NAME = 'gospod-v6';
 
 // Global variables
 let lastQuestion = '';
