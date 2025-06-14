@@ -1,3 +1,2 @@
 ultralytics==8.1.5
-torch==2.0.1+cpu  # or similar CPU build
-Pillow
+torch==2.0.1
