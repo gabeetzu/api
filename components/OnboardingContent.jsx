@@ -22,16 +22,15 @@ export default function OnboardingContent() {
   };
 
   return (
-    <main className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Welcome to Infinity VR Companion</h1>
-      <p className="mb-4">Before you start, here are some quick VR tips:</p>
+    <main className="space-y-5">
+      <header className="glass-card space-y-2">
+        <h1 className="section-title">Welcome to Infinity VR Companion</h1>
+        <p className="subheading">Quick neon-lit tips to launch your best VR session.</p>
+      </header>
       {tips.map((tip, index) => (
         <TipCard key={index} tip={tip} />
       ))}
-      <button
-        onClick={handleContinue}
-        className="mt-4 px-4 py-2 bg-green-600 text-white font-semibold rounded"
-      >
+      <button onClick={handleContinue} className="neon-button self-start">
         Let&apos;s Get Started
       </button>
     </main>

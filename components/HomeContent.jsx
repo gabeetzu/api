@@ -19,33 +19,49 @@ export default function HomeContent() {
   const todayTip = tips[todayIndex];
 
   return (
-    <main className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Infinity VR Companion</h1>
+    <main className="space-y-6">
+      <header className="glass-card">
+        <h1 className="section-title mb-2">Infinity VR Companion</h1>
+        <p className="subheading">
+          Navigate VR with a neon-lit copilot—personal tips, comfort, troubleshooting, and game
+          scouting in one sleek hub.
+        </p>
+      </header>
+
       <TipCard tip={todayTip} />
 
-      <h2 className="text-xl font-semibold mt-6 mb-2">Assistant Options:</h2>
-      <ul className="space-y-2">
-        <li>
-          <Link href="/comfort" className="text-blue-600 underline">
-            Comfort Coach
-          </Link>
-        </li>
-        <li>
-          <Link href="/troubleshooter" className="text-blue-600 underline">
-            Troubleshooter
-          </Link>
-        </li>
-        <li>
-          <Link href="/game-finder" className="text-blue-600 underline">
-            Game Finder
-          </Link>
-        </li>
-        <li>
-          <Link href="/chat" className="text-blue-600 underline">
-            Open Chat
-          </Link>
-        </li>
-      </ul>
+      <section className="glass-card space-y-4">
+        <div>
+          <h2 className="section-title text-xl">Assistant Options</h2>
+          <p className="subheading">Pick a mode and we&apos;ll glow the path ahead.</p>
+        </div>
+        <ul className="space-y-3">
+          <li className="list-tile">
+            <span className="font-semibold">Comfort Coach</span>
+            <Link href="/comfort" className="neon-link">
+              Open
+            </Link>
+          </li>
+          <li className="list-tile">
+            <span className="font-semibold">Troubleshooter</span>
+            <Link href="/troubleshooter" className="neon-link">
+              Open
+            </Link>
+          </li>
+          <li className="list-tile">
+            <span className="font-semibold">Game Finder</span>
+            <Link href="/game-finder" className="neon-link">
+              Open
+            </Link>
+          </li>
+          <li className="list-tile">
+            <span className="font-semibold">Open Chat</span>
+            <Link href="/chat" className="neon-link">
+              Open
+            </Link>
+          </li>
+        </ul>
+      </section>
     </main>
   );
 }

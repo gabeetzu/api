@@ -6,8 +6,11 @@ export const metadata = {
 
 export default function TroubleshooterPage() {
   return (
-    <main className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Troubleshooter</h1>
+    <main className="space-y-5">
+      <header className="glass-card">
+        <h1 className="section-title text-2xl">Troubleshooter</h1>
+        <p className="subheading">Diagnostics with neon clarity for every VR hiccup.</p>
+      </header>
       <ChatUI mode="troubleshoot" />
     </main>
   );
