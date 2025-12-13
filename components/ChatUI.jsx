@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 const greetings = {
   comfort:
     "Hello! I'm your VR Comfort Coach. How can I help you feel more comfortable in VR today?",
-  troubleshoot: 'Hi, I\'m your VR Troubleshooting assistant. What issue can I help you solve?',
+  troubleshoot: "Hi, I'm your VR Troubleshooting assistant. What issue can I help you solve?",
   game:
     "Hello! I'm your VR Game Finder. Tell me what you like, and I'll recommend a VR game for you.",
   chat: "Hi there! I'm your VR companion. Ask me anything about VR!",
@@ -69,23 +69,24 @@ export default function ChatUI({ mode }) {
   };
 
   return (
-    <div className="chat-ui">
-      <div className="messages mb-2">
+    <div className="glass-card space-y-4">
+      <div className="messages space-y-3 max-h-[420px] overflow-y-auto pr-1">
         {messages.map((msg, idx) => (
           <div
             key={idx}
-            className={`mb-2 ${
-              msg.role === 'assistant' ? 'text-blue-600' : 'text-green-600 text-right'
-            }`}
+            className={`chat-bubble ${msg.role === 'assistant' ? 'assistant' : 'user'}`}
           >
-            <strong>{msg.role === 'assistant' ? 'Assistant' : 'You'}:</strong> {msg.content}
+            <strong className="block text-sm uppercase tracking-wide text-white/80">
+              {msg.role === 'assistant' ? 'Assistant' : 'You'}
+            </strong>
+            <p className="mt-1 leading-relaxed">{msg.content}</p>
           </div>
         ))}
       </div>
-      <div className="flex items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           type="text"
-          className="flex-1 border border-gray-300 rounded px-2 py-1"
+          className="input-field"
           placeholder="Type your message..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -97,11 +98,7 @@ export default function ChatUI({ mode }) {
             }
           }}
         />
-        <button
-          onClick={sendMessage}
-          className="ml-2 px-4 py-1 bg-blue-500 text-white font-semibold rounded disabled:opacity-60"
-          disabled={loading}
-        >
+        <button onClick={sendMessage} className="neon-button sm:w-auto w-full" disabled={loading}>
           {loading ? 'Sending...' : 'Send'}
         </button>
       </div>

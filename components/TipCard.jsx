@@ -1,13 +1,15 @@
 export default function TipCard({ tip }) {
   return (
-    <div className="rounded-lg shadow-md p-4 mb-4 bg-white">
-      <img
-        src={tip.image}
-        alt={tip.title}
-        className="w-full h-32 object-cover rounded"
-      />
-      <h3 className="text-lg font-bold mt-2">{tip.title}</h3>
-      <p className="text-gray-700">{tip.content}</p>
+    <div className="glass-card">
+      <div className="card-image mb-3">
+        <img
+          src={tip.image}
+          alt={tip.title}
+          className="w-full h-40 object-cover"
+        />
+      </div>
+      <h3 className="text-lg font-semibold">{tip.title}</h3>
+      <p className="card-text mt-1 leading-relaxed">{tip.content}</p>
     </div>
   );
 }

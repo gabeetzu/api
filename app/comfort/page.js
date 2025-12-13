@@ -6,8 +6,11 @@ export const metadata = {
 
 export default function ComfortCoachPage() {
   return (
-    <main className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Comfort Coach</h1>
+    <main className="space-y-5">
+      <header className="glass-card">
+        <h1 className="section-title text-2xl">Comfort Coach</h1>
+        <p className="subheading">Tuning your VR setup for calm, steady sessions.</p>
+      </header>
       <ChatUI mode="comfort" />
     </main>
   );
