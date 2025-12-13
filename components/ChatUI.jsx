@@ -19,7 +19,12 @@ export default function ChatUI({ mode }) {
 
   useEffect(() => {
     if (mode && greetings[mode]) {
-      setMessages([{ role: 'assistant', content: greetings[mode] }]);
+      const greetingMessage = { role: 'assistant', content: greetings[mode] };
+      setMessages([greetingMessage]);
+      setConversation([greetingMessage]);
+    } else {
+      setMessages([]);
+      setConversation([]);
     }
   }, [mode]);
 
@@ -29,7 +34,8 @@ export default function ChatUI({ mode }) {
     const userText = input.trim();
     const userMessage = { role: 'user', content: userText };
     setMessages((prev) => [...prev, userMessage]);
-    setConversation((prev) => [...prev, userMessage]);
+    const nextConversation = [...conversation, userMessage];
+    setConversation(nextConversation);
     setInput('');
     setLoading(true);
 
@@ -37,7 +43,7 @@ export default function ChatUI({ mode }) {
       const response = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...conversation, userMessage], mode }),
+        body: JSON.stringify({ messages: nextConversation, mode }),
       });
 
       const data = await response.json();
