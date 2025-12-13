@@ -1,12 +1,14 @@
 const express = require('express');
 const next = require('next');
 const OpenAI = require('openai');
+const rateLimit = require('express-rate-limit');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openAiApiKey = process.env.OPENAI_API_KEY;
+const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const systemPrompts = {
   comfort:
@@ -21,30 +23,70 @@ const systemPrompts = {
 
 app.prepare().then(() => {
   const server = express();
+  server.set('trust proxy', 1);
   server.use(express.json());
 
-  server.post('/api/ask', async (req, res) => {
+  const askLimiter = rateLimit({
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+    max: Number(process.env.RATE_LIMIT_MAX) || 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      res
+        .status(429)
+        .json({ error: 'Rate limit exceeded. Please slow down.' });
+    },
+  });
+
+  server.get('/api/healthz', (req, res) => {
+    res.json({
+      ok: true,
+      hasOpenAIKey: Boolean(openAiApiKey),
+    });
+  });
+
+  server.post('/api/ask', askLimiter, async (req, res) => {
     const { messages, mode } = req.body;
 
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Invalid request format.' });
+    if (!Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
-    const conversation = [];
-    if (mode && systemPrompts[mode]) {
-      conversation.push({ role: 'system', content: systemPrompts[mode] });
+    const sanitizedMessages = messages.map((message) => ({
+      role: message?.role,
+      content: message?.content,
+    }));
+
+    const hasInvalidMessage = sanitizedMessages.some(
+      (message) =>
+        !message ||
+        typeof message !== 'object' ||
+        !['user', 'assistant'].includes(message.role) ||
+        typeof message.content !== 'string',
+    );
+
+    if (hasInvalidMessage) {
+      return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
-    conversation.push(...messages);
+    if (!openai || !openAiApiKey) {
+      return res.status(500).json({ error: 'Server misconfigured' });
+    }
 
     try {
-      const completion = await openai.chat.completions.create({
+      const requestPayload = {
         model: 'gpt-4o-mini',
-        messages: conversation,
-      });
+        input: sanitizedMessages,
+        max_output_tokens: 700,
+      };
 
-      const assistantReply = completion.choices[0]?.message?.content;
-      res.json({ assistant: assistantReply });
+      if (mode && systemPrompts[mode]) {
+        requestPayload.instructions = systemPrompts[mode];
+      }
+
+      const response = await openai.responses.create(requestPayload);
+
+      res.json({ assistant: response.output_text?.trim() ?? '' });
     } catch (err) {
       console.error('OpenAI API error:', err);
       res.status(500).json({ error: 'Failed to get response from AI.' });
