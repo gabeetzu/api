@@ -52,9 +52,14 @@ app.prepare().then(() => {
       return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
+    const MAX_MESSAGE_LENGTH = 4_000;
+    const MAX_TOTAL_CONTENT_LENGTH = 20_000;
+    const MAX_MESSAGES = 50;
+
     const sanitizedMessages = messages.map((message) => ({
       role: message?.role,
-      content: message?.content,
+      content:
+        typeof message?.content === 'string' ? message.content.trim() : message?.content,
     }));
 
     const hasInvalidMessage = sanitizedMessages.some(
@@ -67,6 +72,36 @@ app.prepare().then(() => {
 
     if (hasInvalidMessage) {
       return res.status(400).json({ error: 'Invalid messages format.' });
+    }
+
+    if (sanitizedMessages.length > MAX_MESSAGES) {
+      return res.status(400).json({ error: 'Too many messages.' });
+    }
+
+    const hasEmptyContent = sanitizedMessages.some((message) => message.content.length === 0);
+    if (hasEmptyContent) {
+      return res.status(400).json({ error: 'Message content cannot be empty.' });
+    }
+
+    const hasOversizedMessage = sanitizedMessages.some(
+      (message) => message.content.length > MAX_MESSAGE_LENGTH,
+    );
+
+    if (hasOversizedMessage) {
+      return res
+        .status(400)
+        .json({ error: `Message content exceeds ${MAX_MESSAGE_LENGTH} characters.` });
+    }
+
+    const totalContentLength = sanitizedMessages.reduce(
+      (sum, message) => sum + message.content.length,
+      0,
+    );
+
+    if (totalContentLength > MAX_TOTAL_CONTENT_LENGTH) {
+      return res
+        .status(400)
+        .json({ error: 'Conversation is too large.' });
     }
 
     if (!openai || !openAiApiKey) {
