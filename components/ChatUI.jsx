@@ -69,38 +69,58 @@ export default function ChatUI({ mode }) {
   };
 
   return (
-    <div className="glass-card space-y-4">
-      <div className="messages space-y-3 max-h-[420px] overflow-y-auto pr-1">
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`chat-bubble ${msg.role === 'assistant' ? 'assistant' : 'user'}`}
-          >
-            <strong className="block text-sm uppercase tracking-wide text-white/80">
-              {msg.role === 'assistant' ? 'Assistant' : 'You'}
-            </strong>
-            <p className="mt-1 leading-relaxed">{msg.content}</p>
+    <div className="chat-shell glass-card overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none holo-grid" aria-hidden />
+      <div className="relative space-y-4">
+        <div className="holo-panel space-y-4 max-h-[420px] overflow-y-auto pr-2">
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`message-row ${msg.role === 'assistant' ? 'assistant' : 'user'}`}
+            >
+              <div className={`message-avatar ${msg.role === 'assistant' ? 'assistant' : 'user'}`}>
+                {msg.role === 'assistant' ? '🤖' : '🧑‍🚀'}
+              </div>
+              <div
+                className={`message-bubble ${msg.role === 'assistant' ? 'assistant' : 'user'}`}
+              >
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-white/70">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500" />
+                  {msg.role === 'assistant' ? 'Assistant' : 'You'}
+                </div>
+                <p className="mt-2 leading-relaxed text-white/90">{msg.content}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex-1 rounded-full border border-white/10 bg-[radial-gradient(circle_at_20%_50%,rgba(77,232,244,0.18),transparent_32%),radial-gradient(circle_at_80%_50%,rgba(255,63,164,0.16),transparent_32%),rgba(255,255,255,0.04)] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_10px_40px_rgba(0,0,0,0.35)]">
+            <input
+              type="text"
+              className="chat-input"
+              placeholder="Type your message..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={loading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+            />
           </div>
-        ))}
-      </div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <input
-          type="text"
-          className="input-field"
-          placeholder="Type your message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-        />
-        <button onClick={sendMessage} className="neon-button sm:w-auto w-full" disabled={loading}>
-          {loading ? 'Sending...' : 'Send'}
-        </button>
+          <button
+            onClick={sendMessage}
+            className="send-button sm:w-auto w-full"
+            disabled={loading}
+          >
+            <span className="text-lg">{loading ? '⏳' : '🚀'}</span>
+            <span className="font-semibold tracking-[0.12em] uppercase">
+              {loading ? 'Sending' : 'Send'}
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );

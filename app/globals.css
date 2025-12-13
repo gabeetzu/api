@@ -199,6 +199,181 @@ main {
   box-shadow: 0 0 22px rgba(77, 232, 244, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
+.chat-shell {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(140deg, rgba(77, 232, 244, 0.08), rgba(255, 63, 164, 0.07));
+}
+
+.holo-grid {
+  background: radial-gradient(circle at 20% 20%, rgba(77, 232, 244, 0.15), transparent 28%),
+    radial-gradient(circle at 80% 0%, rgba(255, 63, 164, 0.14), transparent 26%),
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+  opacity: 0.55;
+}
+
+.holo-panel {
+  position: relative;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 16px 44px rgba(0, 0, 0, 0.35);
+}
+
+.message-row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.message-row.user {
+  justify-content: flex-end;
+}
+
+.message-avatar {
+  height: 2.6rem;
+  width: 2.6rem;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  font-size: 1.2rem;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.15), transparent 60%),
+    rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 25px rgba(77, 232, 244, 0.35);
+}
+
+.message-avatar.user {
+  box-shadow: 0 0 25px rgba(255, 63, 164, 0.32);
+}
+
+.message-bubble {
+  flex: 1;
+  padding: 1rem 1rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.message-bubble.assistant {
+  border-color: rgba(77, 232, 244, 0.45);
+  box-shadow: 0 0 28px rgba(77, 232, 244, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.message-bubble.user {
+  border-color: rgba(255, 63, 164, 0.4);
+  box-shadow: 0 0 28px rgba(255, 63, 164, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.chat-input {
+  width: 100%;
+  border-radius: 9999px;
+  padding: 1rem 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: #fff;
+  font-size: 1rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.chat-input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(77, 232, 244, 0.7);
+  box-shadow: 0 0 26px rgba(77, 232, 244, 0.28), 0 0 12px rgba(255, 63, 164, 0.18);
+}
+
+.send-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 1rem 1.4rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(77, 232, 244, 0.6);
+  background: radial-gradient(circle at 20% 20%, rgba(77, 232, 244, 0.22), transparent 45%),
+    radial-gradient(circle at 80% 80%, rgba(255, 63, 164, 0.22), transparent 45%),
+    linear-gradient(120deg, rgba(77, 232, 244, 0.35), rgba(255, 63, 164, 0.28));
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  box-shadow: 0 0 18px rgba(77, 232, 244, 0.35), 0 10px 35px rgba(0, 0, 0, 0.4);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.send-button:hover {
+  transform: translateY(-2px) scale(1.01);
+  border-color: rgba(255, 63, 164, 0.7);
+  box-shadow: 0 0 28px rgba(255, 63, 164, 0.35), 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.send-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.mode-card {
+  position: relative;
+  display: block;
+  padding: 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.04));
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  overflow: hidden;
+}
+
+.mode-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 20%, rgba(77, 232, 244, 0.15), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(255, 63, 164, 0.16), transparent 30%);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.mode-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(77, 232, 244, 0.65);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.35), 0 0 24px rgba(77, 232, 244, 0.2);
+}
+
+.mode-card:hover::before {
+  opacity: 1;
+}
+
+.mode-icon {
+  height: 2.5rem;
+  width: 2.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.8rem;
+  background: linear-gradient(135deg, rgba(77, 232, 244, 0.25), rgba(255, 63, 164, 0.25));
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-size: 1.1rem;
+}
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 9999px;
+  background: rgba(77, 232, 244, 0.12);
+  border: 1px solid rgba(77, 232, 244, 0.4);
+  color: var(--vr-text);
+  font-size: 0.85rem;
+}
+
 .chat-bubble.user {
   border-color: rgba(255, 63, 164, 0.4);
   box-shadow: 0 0 18px rgba(255, 63, 164, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
