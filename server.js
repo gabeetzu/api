@@ -106,7 +106,34 @@ const quotaRedis = quotaRedisUrl
   ? new Redis(quotaRedisUrl, { enableOfflineQueue: false })
   : null;
 const fallbackQuotaTracker = new Map();
+let fallbackCleanupInterval;
 let quotaStoreFailureCount = 0;
+
+const cleanupFallbackQuotaTracker = () => {
+  const now = Date.now();
+  for (const [identifier, record] of fallbackQuotaTracker.entries()) {
+    if (!record?.expiresAt || record.expiresAt <= now) {
+      fallbackQuotaTracker.delete(identifier);
+    }
+  }
+};
+
+const startFallbackCleanup = () => {
+  if (fallbackCleanupInterval) {
+    return;
+  }
+
+  fallbackCleanupInterval = setInterval(cleanupFallbackQuotaTracker, Math.max(QUOTA_WINDOW_MS, 1_000));
+};
+
+const stopFallbackCleanup = () => {
+  if (!fallbackCleanupInterval) {
+    return;
+  }
+
+  clearInterval(fallbackCleanupInterval);
+  fallbackCleanupInterval = null;
+};
 
 const profanityList = ['damn', 'shit', 'fuck'];
 
@@ -143,12 +170,23 @@ if (quotaRedis) {
   quotaRedis.on('error', (err) => logQuotaStoreFailure(err));
 }
 
+['SIGINT', 'SIGTERM', 'exit'].forEach((event) => {
+  process.on(event, () => {
+    stopFallbackCleanup();
+  });
+});
+
 const checkQuotaFallback = (identifier) => {
+  startFallbackCleanup();
   const now = Date.now();
   const record = fallbackQuotaTracker.get(identifier);
 
-  if (!record || now - record.windowStart > QUOTA_WINDOW_MS) {
-    fallbackQuotaTracker.set(identifier, { windowStart: now, count: 1 });
+  if (!record || record.expiresAt <= now) {
+    fallbackQuotaTracker.set(identifier, {
+      windowStart: now,
+      count: 1,
+      expiresAt: now + QUOTA_WINDOW_MS,
+    });
     return { allowed: true, store: 'memory' };
   }
 
