@@ -2,6 +2,9 @@ const express = require('express');
 const next = require('next');
 const OpenAI = require('openai');
 const rateLimit = require('express-rate-limit');
+const dns = require('dns').promises;
+const net = require('net');
+const { Agent } = require('undici');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -11,6 +14,9 @@ const openAiApiKey = process.env.OPENAI_API_KEY;
 const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const ALLOWED_MODES = new Set(['comfort', 'troubleshoot', 'game', 'chat']);
+
+const URL_REGEX = /https?:\/\/[^\s]+/i;
+const PREVIEW_MAX_BODY_BYTES = Number(process.env.PREVIEW_MAX_BODY_BYTES) || 512 * 1024;
 
 const QUOTA_WINDOW_MS = Number(process.env.QUOTA_WINDOW_MS) || 60 * 60 * 1000;
 const QUOTA_MAX_REQUESTS = Number(process.env.QUOTA_MAX_REQUESTS) || 200;
@@ -66,6 +72,355 @@ const systemPrompts = {
     'You are a helpful AI assistant knowledgeable about VR. Engage in open conversation and answer questions about VR or any topic the user asks.',
 };
 
+const fetchWithTimeout = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 5000);
+
+  const fetchOptions = { ...options, signal: controller.signal };
+
+  if (options.lookupHost) {
+    const { hostname, address, family } = options.lookupHost;
+    fetchOptions.dispatcher =
+      options.dispatcher ||
+      new Agent({
+        connect: {
+          lookup: (host, lookupOptions, callback) => {
+            if (host === hostname) {
+              callback(null, address, family || net.isIP(address));
+              return;
+            }
+
+            dns
+              .lookup(host, { all: false, family: lookupOptions?.family || 0 })
+              .then((result) => callback(null, result.address, result.family))
+              .catch((err) => callback(err));
+          },
+          servername: hostname,
+        },
+      });
+  }
+
+  delete fetchOptions.lookupHost;
+
+  try {
+    const response = await fetch(url, fetchOptions);
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const parseMetaTag = (html, name) => {
+  const metaRegex = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i');
+  const match = html.match(metaRegex);
+  return match?.[1];
+};
+
+const readTextWithLimit = async (response, maxBytes) => {
+  if (!response?.body) {
+    throw new Error('Missing response body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let result = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new Error('Preview body too large');
+    }
+
+    result += decoder.decode(value, { stream: true });
+  }
+
+  result += decoder.decode();
+  return result;
+};
+
+const classifyUrlType = (url) => {
+  if (!url) return 'text';
+  if (/youtube\.com|youtu\.be|vimeo\.com/i.test(url)) {
+    return 'video';
+  }
+  return 'link';
+};
+
+const PREVIEW_HOST_ALLOWLIST = (process.env.PREVIEW_HOST_ALLOWLIST || '')
+  .split(',')
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
+
+const isPrivateIp = (ip) => {
+  if (!ip) return true;
+
+  if (ip === '127.0.0.1' || ip === '::1') {
+    return true;
+  }
+
+  if (net.isIP(ip) === 6) {
+    const normalized = ip.toLowerCase();
+    const mappedIpv4 = normalized.match(/^::ffff:([0-9.]+)$/);
+    if (mappedIpv4) {
+      const mappedAddress = mappedIpv4[1];
+      const mappedMatch = mappedAddress.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (mappedMatch) {
+        const [mappedOctet1, mappedOctet2] = mappedMatch.slice(1).map(Number);
+        if (mappedOctet1 === 10) return true;
+        if (mappedOctet1 === 127) return true;
+        if (mappedOctet1 === 192 && mappedOctet2 === 168) return true;
+        if (mappedOctet1 === 169 && mappedOctet2 === 254) return true;
+        if (mappedOctet1 === 172 && mappedOctet2 >= 16 && mappedOctet2 <= 31) return true;
+      }
+    }
+
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // Unique local
+    if (normalized.startsWith('fe80') || normalized.startsWith('fec0')) return true; // Link-local/site-local
+  }
+
+  const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [octet1, octet2] = ipv4Match.slice(1).map(Number);
+    if (octet1 === 10) return true;
+    if (octet1 === 127) return true;
+    if (octet1 === 192 && octet2 === 168) return true;
+    if (octet1 === 169 && octet2 === 254) return true;
+    if (octet1 === 172 && octet2 >= 16 && octet2 <= 31) return true;
+  }
+
+  return false;
+};
+
+const isPrivateAddress = (hostname) => {
+  if (!hostname) return true;
+
+  const normalized = hostname.toLowerCase();
+  if (net.isIP(normalized)) {
+    return isPrivateIp(normalized);
+  }
+
+  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+    return true;
+  }
+
+  // Block obvious internal hostnames
+  if (/[.]local$|[.]internal$|[.]localhost$/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
+
+const resolvePublicDns = async (hostname) => {
+  try {
+    const records = await dns.lookup(hostname, { all: true });
+    if (!records || records.length === 0) {
+      return null;
+    }
+
+    const publicRecords = records.filter((record) => !isPrivateIp(record.address));
+    if (publicRecords.length === 0) {
+      return null;
+    }
+
+    return publicRecords;
+  } catch (err) {
+    console.warn(`DNS lookup failed for ${hostname}:`, err.message);
+    return null;
+  }
+};
+
+const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
+  let currentUrl;
+  let currentLookupHost;
+  try {
+    currentUrl = new URL(rawUrl);
+  } catch (err) {
+    console.warn('Rejected preview URL:', err.message);
+    return null;
+  }
+
+  if (!['http:', 'https:'].includes(currentUrl.protocol)) {
+    return null;
+  }
+
+  for (let i = 0; i <= maxRedirects; i += 1) {
+    const hostname = currentUrl.hostname.toLowerCase();
+
+    let lookupRecords;
+
+    if (PREVIEW_HOST_ALLOWLIST.length > 0) {
+      if (!PREVIEW_HOST_ALLOWLIST.includes(hostname)) {
+        return null;
+      }
+      lookupRecords = await resolvePublicDns(hostname);
+      if (!lookupRecords) {
+        return null;
+      }
+    } else if (isPrivateAddress(hostname)) {
+      return null;
+    } else {
+      lookupRecords = await resolvePublicDns(hostname);
+      if (!lookupRecords) {
+        return null;
+      }
+    }
+
+    currentLookupHost = lookupRecords?.[0]
+      ? { hostname, address: lookupRecords[0].address, family: lookupRecords[0].family }
+      : null;
+
+    try {
+      const headResponse = await fetchWithTimeout(currentUrl.toString(), {
+        method: 'HEAD',
+        redirect: 'manual',
+        timeoutMs: 3000,
+        lookupHost: currentLookupHost,
+      });
+
+      if (headResponse.status >= 300 && headResponse.status < 400 && headResponse.headers.has('location')) {
+        const location = headResponse.headers.get('location');
+        const nextUrl = new URL(location, currentUrl);
+        if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+          return null;
+        }
+        currentUrl = nextUrl;
+        continue;
+      }
+
+      return { url: currentUrl.toString(), lookupHost: currentLookupHost };
+    } catch (err) {
+      console.warn('Preview HEAD request failed:', err.message);
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const fetchLinkPreview = async (url) => {
+  const safeResult = await resolveSafeUrl(url);
+
+  if (!safeResult) {
+    return { url };
+  }
+
+  const { url: safeUrl, lookupHost: resolvedHost } = safeResult;
+
+  try {
+    const noEmbedResponse = await fetchWithTimeout(
+      `https://noembed.com/embed?url=${encodeURIComponent(safeUrl)}`,
+      { timeoutMs: 4000 },
+    );
+
+    if (noEmbedResponse.ok) {
+      const data = await noEmbedResponse.json();
+      if (data?.title || data?.thumbnail_url) {
+        return {
+          title: data.title,
+          description: data.author_name,
+          image: data.thumbnail_url,
+          siteName: data.provider_name,
+          url: safeUrl,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('NoEmbed lookup failed:', err.message);
+  }
+
+  try {
+    let currentUrl = safeUrl;
+    let currentLookupHost = resolvedHost;
+    let response;
+    const previewFetchOptions = { timeoutMs: 4000, redirect: 'manual' };
+
+    for (let i = 0; i < 2; i += 1) {
+      response = await fetchWithTimeout(currentUrl, {
+        ...previewFetchOptions,
+        lookupHost: currentLookupHost,
+      });
+
+      if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
+        const redirectedUrl = new URL(response.headers.get('location'), currentUrl).toString();
+        const sanitizedRedirect = await resolveSafeUrl(redirectedUrl);
+
+        if (!sanitizedRedirect) {
+          throw new Error('Redirected to unsafe URL during preview fetch');
+        }
+
+        currentUrl = sanitizedRedirect.url;
+        currentLookupHost = sanitizedRedirect.lookupHost;
+        continue;
+      }
+
+      // Even though we explicitly request manual redirects, double check the response
+      // did not already follow a redirect to an unsafe target.
+      if (response.redirected) {
+        throw new Error('Preview fetch unexpectedly followed a redirect');
+      }
+
+      break;
+    }
+
+    if (!response || !response.ok || (response.status >= 300 && response.status < 400)) {
+      throw new Error(`Status ${response?.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('text')) {
+      throw new Error('Unsupported preview content type');
+    }
+
+    const contentLengthHeader = response.headers.get('content-length');
+    if (contentLengthHeader) {
+      const contentLength = Number.parseInt(contentLengthHeader, 10);
+      if (Number.isFinite(contentLength) && contentLength > PREVIEW_MAX_BODY_BYTES) {
+        throw new Error('Preview body exceeds configured size');
+      }
+    }
+
+    const html = await readTextWithLimit(response, PREVIEW_MAX_BODY_BYTES);
+
+    return {
+      title:
+        parseMetaTag(html, 'og:title') ||
+        parseMetaTag(html, 'twitter:title') ||
+        html.match(/<title>([^<]+)<\/title>/i)?.[1],
+      description:
+        parseMetaTag(html, 'og:description') ||
+        parseMetaTag(html, 'twitter:description'),
+      image: parseMetaTag(html, 'og:image') || parseMetaTag(html, 'twitter:image'),
+      siteName: parseMetaTag(html, 'og:site_name'),
+      url: response.url || currentUrl,
+    };
+  } catch (err) {
+    console.warn('Open Graph lookup failed:', err.message);
+  }
+
+  return { url };
+};
+
+const enrichMessage = async (message) => {
+  const content = message?.content || '';
+  const url = content.match(URL_REGEX)?.[0];
+
+  if (!url) {
+    return { type: 'text' };
+  }
+
+  const preview = await fetchLinkPreview(url);
+  return {
+    type: classifyUrlType(url),
+    metadata: preview,
+  };
+};
+
 app.prepare().then(() => {
   const server = express();
   server.set('trust proxy', 1);
@@ -116,6 +471,7 @@ app.prepare().then(() => {
       role: message?.role,
       content:
         typeof message?.content === 'string' ? message.content.trim() : message?.content,
+      type: message?.type || 'text',
     }));
 
     const hasInvalidMessage = sanitizedMessages.some(
@@ -178,7 +534,7 @@ app.prepare().then(() => {
       }
 
       const scrubbedMessages = sanitizedMessages.map((message) => ({
-        ...message,
+        role: message.role,
         content: scrubContent(message.content),
       }));
 
@@ -193,8 +549,20 @@ app.prepare().then(() => {
       }
 
       const response = await openai.responses.create(requestPayload);
+      const assistantContent = response.output_text?.trim() ?? '';
 
-      res.json({ assistant: response.output_text?.trim() ?? '' });
+      const enrichedUserMessage = await enrichMessage(sanitizedMessages[sanitizedMessages.length - 1]);
+      const assistantEnrichment = await enrichMessage({ content: assistantContent });
+
+      res.json({
+        assistant: {
+          role: 'assistant',
+          content: assistantContent,
+          type: assistantEnrichment.type || 'text',
+          metadata: assistantEnrichment.metadata,
+        },
+        enrichedUser: enrichedUserMessage,
+      });
     } catch (err) {
       console.error('OpenAI API error:', err);
       res.status(500).json({ error: 'Failed to get response from AI.' });
