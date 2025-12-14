@@ -5,12 +5,82 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const dns = require('dns').promises;
 const net = require('net');
+const { randomUUID } = require('crypto');
+const pino = require('pino');
+const client = require('prom-client');
 const { Agent } = require('undici');
 const Redis = require('ioredis');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
+
+const noopLogger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => noopLogger };
+
+const loggingEnabled =
+  process.env.ENABLE_LOGGING === 'true' || (!dev && process.env.ENABLE_LOGGING !== 'false');
+const baseLogger = loggingEnabled ? pino({ level: process.env.LOG_LEVEL || 'info' }) : noopLogger;
+
+const metricsEnabled =
+  process.env.ENABLE_METRICS === 'true' || (!dev && process.env.ENABLE_METRICS !== 'false');
+
+const noopTimer = () => () => {};
+const noopMetric = { inc: () => {}, startTimer: () => noopTimer };
+
+const metricsRegistry = metricsEnabled ? new client.Registry() : null;
+const metrics = metricsEnabled
+  ? {
+      askRequests: new client.Counter({
+        name: 'api_ask_requests_total',
+        help: 'Total /api/ask requests by outcome',
+        registers: [metricsRegistry],
+        labelNames: ['outcome'],
+      }),
+      askDuration: new client.Histogram({
+        name: 'api_ask_duration_seconds',
+        help: 'Duration of /api/ask requests',
+        registers: [metricsRegistry],
+        labelNames: ['outcome'],
+        buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
+      }),
+      openAiCalls: new client.Counter({
+        name: 'openai_calls_total',
+        help: 'Count of OpenAI API calls by operation and outcome',
+        registers: [metricsRegistry],
+        labelNames: ['operation', 'outcome'],
+      }),
+      openAiDuration: new client.Histogram({
+        name: 'openai_call_duration_seconds',
+        help: 'Duration of OpenAI API calls by operation',
+        registers: [metricsRegistry],
+        labelNames: ['operation'],
+        buckets: [0.1, 0.5, 1, 2, 5, 10, 20],
+      }),
+      moderationDecisions: new client.Counter({
+        name: 'moderation_decisions_total',
+        help: 'Moderation decision counts',
+        registers: [metricsRegistry],
+        labelNames: ['result'],
+      }),
+      quotaDecisions: new client.Counter({
+        name: 'quota_decisions_total',
+        help: 'Quota decisions by status and store',
+        registers: [metricsRegistry],
+        labelNames: ['status', 'store'],
+      }),
+    }
+  : {
+      askRequests: noopMetric,
+      askDuration: noopMetric,
+      openAiCalls: noopMetric,
+      openAiDuration: noopMetric,
+      moderationDecisions: noopMetric,
+      quotaDecisions: noopMetric,
+    };
+
+if (metricsEnabled) {
+  client.collectDefaultMetrics({ register: metricsRegistry });
+}
 
 const openAiApiKey = process.env.OPENAI_API_KEY;
 const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
@@ -62,7 +132,8 @@ const scrubContent = (text) => {
 
 const logQuotaStoreFailure = (err) => {
   quotaStoreFailureCount += 1;
-  console.warn('Quota store unavailable; using fallback tracker', {
+  baseLogger.warn({
+    event: 'quota_store_unavailable',
     error: err?.message || err,
     failures: quotaStoreFailureCount,
   });
@@ -78,15 +149,15 @@ const checkQuotaFallback = (identifier) => {
 
   if (!record || now - record.windowStart > QUOTA_WINDOW_MS) {
     fallbackQuotaTracker.set(identifier, { windowStart: now, count: 1 });
-    return true;
+    return { allowed: true, store: 'memory' };
   }
 
   if (record.count >= QUOTA_MAX_REQUESTS) {
-    return false;
+    return { allowed: false, store: 'memory' };
   }
 
   record.count += 1;
-  return true;
+  return { allowed: true, store: 'memory' };
 };
 
 const getQuotaKey = (identifier) => `quota:${identifier}`;
@@ -127,10 +198,10 @@ const checkQuota = async (identifier) => {
       const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
 
       if (incrementResult > QUOTA_MAX_REQUESTS) {
-        return false;
+        return { allowed: false, store: 'redis' };
       }
 
-      return true;
+      return { allowed: true, store: 'redis' };
     } catch (err) {
       if (err?.message?.includes('NOSCRIPT')) {
         try {
@@ -139,10 +210,10 @@ const checkQuota = async (identifier) => {
           const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
 
           if (incrementResult > QUOTA_MAX_REQUESTS) {
-            return false;
+            return { allowed: false, store: 'redis' };
           }
 
-          return true;
+          return { allowed: true, store: 'redis' };
         } catch (reloadErr) {
           logQuotaStoreFailure(reloadErr);
         }
@@ -152,7 +223,8 @@ const checkQuota = async (identifier) => {
     }
   }
 
-  return checkQuotaFallback(identifier);
+  const fallbackResult = checkQuotaFallback(identifier);
+  return quotaRedis ? { ...fallbackResult, store: 'fallback' } : fallbackResult;
 };
 
 const systemPrompts = {
@@ -164,6 +236,20 @@ const systemPrompts = {
     'You are a VR Game Recommendation Guru. You ask about user preferences and then suggest suitable VR games with a brief description.',
   chat:
     'You are a helpful AI assistant knowledgeable about VR. Engage in open conversation and answer questions about VR or any topic the user asks.',
+};
+
+const trackOpenAiCall = async (operation, handler) => {
+  const endTimer = metrics.openAiDuration.startTimer();
+  try {
+    const result = await handler();
+    metrics.openAiCalls.inc({ operation, outcome: 'success' });
+    endTimer({ operation });
+    return result;
+  } catch (err) {
+    metrics.openAiCalls.inc({ operation, outcome: 'error' });
+    endTimer({ operation });
+    throw err;
+  }
 };
 
 const fetchWithTimeout = async (url, options = {}) => {
@@ -310,7 +396,7 @@ const isPrivateAddress = (hostname) => {
   return false;
 };
 
-const resolvePublicDns = async (hostname) => {
+const resolvePublicDns = async (hostname, logger = baseLogger) => {
   try {
     const records = await dns.lookup(hostname, { all: true });
     if (!records || records.length === 0) {
@@ -324,22 +410,28 @@ const resolvePublicDns = async (hostname) => {
 
     return publicRecords;
   } catch (err) {
-    console.warn(`DNS lookup failed for ${hostname}:`, err.message);
+    logger.warn({ event: 'preview_safety_denial', reason: 'dns_lookup_failed', hostname, error: err.message });
     return null;
   }
 };
 
-const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
+const resolveSafeUrl = async (rawUrl, maxRedirects = 3, context = {}) => {
+  const logger = context.logger || baseLogger;
   let currentUrl;
   let currentLookupHost;
   try {
     currentUrl = new URL(rawUrl);
   } catch (err) {
-    console.warn('Rejected preview URL:', err.message);
+    logger.warn({ event: 'preview_safety_denial', reason: 'invalid_url', error: err.message });
     return null;
   }
 
   if (!['http:', 'https:'].includes(currentUrl.protocol)) {
+    logger.warn({
+      event: 'preview_safety_denial',
+      reason: 'unsupported_protocol',
+      hostname: currentUrl.hostname,
+    });
     return null;
   }
 
@@ -350,17 +442,21 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
 
     if (PREVIEW_HOST_ALLOWLIST.length > 0) {
       if (!PREVIEW_HOST_ALLOWLIST.includes(hostname)) {
+        logger.warn({ event: 'preview_safety_denial', reason: 'host_not_allowlisted', hostname });
         return null;
       }
-      lookupRecords = await resolvePublicDns(hostname);
+      lookupRecords = await resolvePublicDns(hostname, logger);
       if (!lookupRecords) {
+        logger.warn({ event: 'preview_safety_denial', reason: 'dns_blocked', hostname });
         return null;
       }
     } else if (isPrivateAddress(hostname)) {
+      logger.warn({ event: 'preview_safety_denial', reason: 'private_address', hostname });
       return null;
     } else {
-      lookupRecords = await resolvePublicDns(hostname);
+      lookupRecords = await resolvePublicDns(hostname, logger);
       if (!lookupRecords) {
+        logger.warn({ event: 'preview_safety_denial', reason: 'dns_blocked', hostname });
         return null;
       }
     }
@@ -369,11 +465,11 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
       ? { hostname, address: lookupRecords[0].address, family: lookupRecords[0].family }
       : null;
 
-    try {
-      const headResponse = await fetchWithTimeout(currentUrl.toString(), {
-        method: 'HEAD',
-        redirect: 'manual',
-        timeoutMs: 3000,
+      try {
+        const headResponse = await fetchWithTimeout(currentUrl.toString(), {
+          method: 'HEAD',
+          redirect: 'manual',
+          timeoutMs: 3000,
         lookupHost: currentLookupHost,
       });
 
@@ -381,6 +477,11 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
         const location = headResponse.headers.get('location');
         const nextUrl = new URL(location, currentUrl);
         if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+          logger.warn({
+            event: 'preview_safety_denial',
+            reason: 'redirect_to_unsupported_protocol',
+            hostname,
+          });
           return null;
         }
         currentUrl = nextUrl;
@@ -389,7 +490,7 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
 
       return { url: currentUrl.toString(), lookupHost: currentLookupHost };
     } catch (err) {
-      console.warn('Preview HEAD request failed:', err.message);
+      logger.warn({ event: 'preview_safety_denial', reason: 'head_request_failed', hostname, error: err.message });
       return null;
     }
   }
@@ -397,8 +498,9 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
   return null;
 };
 
-const fetchLinkPreview = async (url) => {
-  const safeResult = await resolveSafeUrl(url);
+const fetchLinkPreview = async (url, context = {}) => {
+  const logger = context.logger || baseLogger;
+  const safeResult = await resolveSafeUrl(url, 3, context);
 
   if (!safeResult) {
     return { url };
@@ -425,7 +527,7 @@ const fetchLinkPreview = async (url) => {
       }
     }
   } catch (err) {
-    console.warn('NoEmbed lookup failed:', err.message);
+    logger.debug({ event: 'preview_lookup_warning', provider: 'noembed', error: err.message });
   }
 
   try {
@@ -494,13 +596,13 @@ const fetchLinkPreview = async (url) => {
       url: response.url || currentUrl,
     };
   } catch (err) {
-    console.warn('Open Graph lookup failed:', err.message);
+    logger.debug({ event: 'preview_lookup_warning', provider: 'open_graph', error: err.message });
   }
 
   return { url };
 };
 
-const enrichMessage = async (message) => {
+const enrichMessage = async (message, context = {}) => {
   const content = message?.content || '';
   const url = content.match(URL_REGEX)?.[0];
 
@@ -508,7 +610,7 @@ const enrichMessage = async (message) => {
     return { type: 'text' };
   }
 
-  const preview = await fetchLinkPreview(url);
+  const preview = await fetchLinkPreview(url, context);
   return {
     type: classifyUrlType(url),
     metadata: preview,
@@ -518,6 +620,14 @@ const enrichMessage = async (message) => {
 app.prepare().then(() => {
   const server = express();
   server.set('trust proxy', 1);
+
+  server.use((req, res, next) => {
+    const requestId = req.headers['x-request-id'] || randomUUID();
+    const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+    req.context = { requestId, clientIp };
+    req.logger = baseLogger.child({ requestId, clientIp });
+    next();
+  });
 
   const hostToOrigins = (hostHeader) => {
     if (!hostHeader) return [];
@@ -553,6 +663,12 @@ app.prepare().then(() => {
     const refererAllowed = isAllowedOrigin(refererOrigin, hostHeader);
 
     if (!originAllowed || !refererAllowed) {
+      req.logger.warn({
+        event: 'origin_rejected',
+        origin,
+        refererOrigin,
+        hostHeader,
+      });
       return res.status(403).json({ error: 'Origin not allowed.' });
     }
 
@@ -611,21 +727,47 @@ app.prepare().then(() => {
     });
   });
 
+  if (metricsEnabled) {
+    server.get('/metrics', async (req, res) => {
+      res.set('Content-Type', metricsRegistry.contentType);
+      res.end(await metricsRegistry.metrics());
+    });
+  }
+
   server.post('/api/ask', checkOriginMiddleware, askLimiter, async (req, res) => {
     const { messages, mode } = req.body;
+    const endAskTimer = metrics.askDuration.startTimer();
+    let askOutcome = 'success';
+    let finished = false;
+
+    const finishRequest = (outcome) => {
+      if (finished) return;
+      finished = true;
+      metrics.askRequests.inc({ outcome });
+      endAskTimer({ outcome });
+    };
 
     if (mode && !ALLOWED_MODES.has(mode)) {
-      console.warn(`Rejected request due to invalid mode: ${mode}`);
+      askOutcome = 'bad_mode';
+      req.logger.warn({ event: 'invalid_mode', mode });
+      finishRequest(askOutcome);
       return res.status(400).json({ error: 'Invalid mode specified.' });
     }
 
     const requesterId = `${req.ip || 'unknown-ip'}::${req.headers['x-user-id'] || 'anonymous'}`;
-    if (!(await checkQuota(requesterId))) {
-      console.warn(`Quota exceeded for ${requesterId}`);
+    const quotaResult = await checkQuota(requesterId);
+    metrics.quotaDecisions.inc({ status: quotaResult.allowed ? 'allowed' : 'blocked', store: quotaResult.store });
+
+    if (!quotaResult.allowed) {
+      askOutcome = 'quota_exceeded';
+      req.logger.warn({ event: 'quota_overage', requesterId, store: quotaResult.store });
+      finishRequest(askOutcome);
       return res.status(429).json({ error: 'Usage quota exceeded. Please try later.' });
     }
 
     if (!Array.isArray(messages)) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
@@ -649,15 +791,21 @@ app.prepare().then(() => {
     );
 
     if (hasInvalidMessage) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res.status(400).json({ error: 'Invalid messages format.' });
     }
 
     if (sanitizedMessages.length > MAX_MESSAGES) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res.status(400).json({ error: 'Too many messages.' });
     }
 
     const hasEmptyContent = sanitizedMessages.some((message) => message.content.length === 0);
     if (hasEmptyContent) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res.status(400).json({ error: 'Message content cannot be empty.' });
     }
 
@@ -666,6 +814,8 @@ app.prepare().then(() => {
     );
 
     if (hasOversizedMessage) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res
         .status(400)
         .json({ error: `Message content exceeds ${MAX_MESSAGE_LENGTH} characters.` });
@@ -677,25 +827,37 @@ app.prepare().then(() => {
     );
 
     if (totalContentLength > MAX_TOTAL_CONTENT_LENGTH) {
+      askOutcome = 'bad_request';
+      finishRequest(askOutcome);
       return res
         .status(400)
         .json({ error: 'Conversation is too large.' });
     }
 
     if (!openai || !openAiApiKey) {
+      askOutcome = 'server_error';
+      finishRequest(askOutcome);
       return res.status(500).json({ error: 'Server misconfigured' });
     }
 
     try {
       const combinedInput = sanitizedMessages.map((message) => `${message.role}: ${message.content}`).join('\n');
-      const moderation = await openai.moderations.create({
-        model: 'omni-moderation-latest',
-        input: combinedInput,
-      });
+      const moderation = await trackOpenAiCall('moderation', () =>
+        openai.moderations.create({
+          model: 'omni-moderation-latest',
+          input: combinedInput,
+        }),
+      );
 
       const moderationResult = moderation.results?.[0];
+      metrics.moderationDecisions.inc({ result: moderationResult?.flagged ? 'flagged' : 'allowed' });
       if (moderationResult?.flagged) {
-        console.warn('Moderation flagged content', moderationResult.categories);
+        askOutcome = 'moderation_blocked';
+        req.logger.warn({
+          event: 'moderation_flagged',
+          categories: moderationResult.categories,
+        });
+        finishRequest(askOutcome);
         return res.status(400).json({ error: 'Content violates usage policies.', categories: moderationResult.categories });
       }
 
@@ -715,8 +877,9 @@ app.prepare().then(() => {
         requestPayload.instructions = systemPrompts[mode];
       }
 
-      const responseStream = await openai.responses.create(requestPayload);
-      const enrichedUserMessage = await enrichMessage(sanitizedMessages[sanitizedMessages.length - 1]);
+      const responseStream = await trackOpenAiCall('responses', () => openai.responses.create(requestPayload));
+      const context = { logger: req.logger, requestId: req.context.requestId, clientIp: req.context.clientIp };
+      const enrichedUserMessage = await enrichMessage(sanitizedMessages[sanitizedMessages.length - 1], context);
 
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -743,7 +906,7 @@ app.prepare().then(() => {
         }
       }
 
-      const assistantEnrichment = await enrichMessage({ content: assistantContent });
+      const assistantEnrichment = await enrichMessage({ content: assistantContent }, context);
 
       sendEvent({
         type: 'done',
@@ -759,8 +922,11 @@ app.prepare().then(() => {
       });
 
       res.end();
+      finishRequest(askOutcome);
     } catch (err) {
-      console.error('OpenAI API error:', err);
+      askOutcome = 'error';
+      req.logger.error({ event: 'openai_api_error', error: err?.message || err });
+      finishRequest(askOutcome);
       if (res.headersSent) {
         res.write(`data: ${JSON.stringify({ type: 'error', data: { message: 'Failed to get response from AI.' } })}\n\n`);
         return res.end();
