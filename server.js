@@ -4,6 +4,7 @@ const OpenAI = require('openai');
 const rateLimit = require('express-rate-limit');
 const dns = require('dns').promises;
 const net = require('net');
+const { Agent } = require('undici');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -74,8 +75,34 @@ const fetchWithTimeout = async (url, options = {}) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 5000);
 
+  const fetchOptions = { ...options, signal: controller.signal };
+
+  if (options.lookupHost) {
+    const { hostname, address, family } = options.lookupHost;
+    fetchOptions.dispatcher =
+      options.dispatcher ||
+      new Agent({
+        connect: {
+          lookup: (host, lookupOptions, callback) => {
+            if (host === hostname) {
+              callback(null, address, family || net.isIP(address));
+              return;
+            }
+
+            dns
+              .lookup(host, { all: false, family: lookupOptions?.family || 0 })
+              .then((result) => callback(null, result.address, result.family))
+              .catch((err) => callback(err));
+          },
+          servername: hostname,
+        },
+      });
+  }
+
+  delete fetchOptions.lookupHost;
+
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, fetchOptions);
     return response;
   } finally {
     clearTimeout(timeoutId);
@@ -147,22 +174,28 @@ const isPrivateAddress = (hostname) => {
   return false;
 };
 
-const isHostnameResolvableToPublicIp = async (hostname) => {
+const resolvePublicDns = async (hostname) => {
   try {
     const records = await dns.lookup(hostname, { all: true });
     if (!records || records.length === 0) {
-      return false;
+      return null;
     }
 
-    return records.every((record) => !isPrivateIp(record.address));
+    const publicRecords = records.filter((record) => !isPrivateIp(record.address));
+    if (publicRecords.length === 0) {
+      return null;
+    }
+
+    return publicRecords;
   } catch (err) {
     console.warn(`DNS lookup failed for ${hostname}:`, err.message);
-    return false;
+    return null;
   }
 };
 
 const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
   let currentUrl;
+  let currentLookupHost;
   try {
     currentUrl = new URL(rawUrl);
   } catch (err) {
@@ -177,24 +210,35 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
   for (let i = 0; i <= maxRedirects; i += 1) {
     const hostname = currentUrl.hostname.toLowerCase();
 
+    let lookupRecords;
+
     if (PREVIEW_HOST_ALLOWLIST.length > 0) {
       if (!PREVIEW_HOST_ALLOWLIST.includes(hostname)) {
+        return null;
+      }
+      lookupRecords = await resolvePublicDns(hostname);
+      if (!lookupRecords) {
         return null;
       }
     } else if (isPrivateAddress(hostname)) {
       return null;
     } else {
-      const isPublic = await isHostnameResolvableToPublicIp(hostname);
-      if (!isPublic) {
+      lookupRecords = await resolvePublicDns(hostname);
+      if (!lookupRecords) {
         return null;
       }
     }
+
+    currentLookupHost = lookupRecords?.[0]
+      ? { hostname, address: lookupRecords[0].address, family: lookupRecords[0].family }
+      : null;
 
     try {
       const headResponse = await fetchWithTimeout(currentUrl.toString(), {
         method: 'HEAD',
         redirect: 'manual',
         timeoutMs: 3000,
+        lookupHost: currentLookupHost,
       });
 
       if (headResponse.status >= 300 && headResponse.status < 400 && headResponse.headers.has('location')) {
@@ -207,7 +251,7 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
         continue;
       }
 
-      return currentUrl.toString();
+      return { url: currentUrl.toString(), lookupHost: currentLookupHost };
     } catch (err) {
       console.warn('Preview HEAD request failed:', err.message);
       return null;
@@ -218,11 +262,13 @@ const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
 };
 
 const fetchLinkPreview = async (url) => {
-  const safeUrl = await resolveSafeUrl(url);
+  const safeResult = await resolveSafeUrl(url);
 
-  if (!safeUrl) {
+  if (!safeResult) {
     return { url };
   }
+
+  const { url: safeUrl, lookupHost: resolvedHost } = safeResult;
 
   try {
     const noEmbedResponse = await fetchWithTimeout(
@@ -248,11 +294,15 @@ const fetchLinkPreview = async (url) => {
 
   try {
     let currentUrl = safeUrl;
+    let currentLookupHost = resolvedHost;
     let response;
     const previewFetchOptions = { timeoutMs: 4000, redirect: 'manual' };
 
     for (let i = 0; i < 2; i += 1) {
-      response = await fetchWithTimeout(currentUrl, previewFetchOptions);
+      response = await fetchWithTimeout(currentUrl, {
+        ...previewFetchOptions,
+        lookupHost: currentLookupHost,
+      });
 
       if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
         const redirectedUrl = new URL(response.headers.get('location'), currentUrl).toString();
@@ -262,7 +312,8 @@ const fetchLinkPreview = async (url) => {
           throw new Error('Redirected to unsafe URL during preview fetch');
         }
 
-        currentUrl = sanitizedRedirect;
+        currentUrl = sanitizedRedirect.url;
+        currentLookupHost = sanitizedRedirect.lookupHost;
         continue;
       }
 
@@ -427,7 +478,7 @@ app.prepare().then(() => {
       }
 
       const scrubbedMessages = sanitizedMessages.map((message) => ({
-        ...message,
+        role: message.role,
         content: scrubContent(message.content),
       }));
 
