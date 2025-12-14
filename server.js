@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const dns = require('dns').promises;
 const net = require('net');
 const { Agent } = require('undici');
+const Redis = require('ioredis');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -29,7 +30,13 @@ const PREVIEW_MAX_BODY_BYTES = Number(process.env.PREVIEW_MAX_BODY_BYTES) || 512
 
 const QUOTA_WINDOW_MS = Number(process.env.QUOTA_WINDOW_MS) || 60 * 60 * 1000;
 const QUOTA_MAX_REQUESTS = Number(process.env.QUOTA_MAX_REQUESTS) || 200;
-const quotaTracker = new Map();
+
+const quotaRedisUrl = process.env.QUOTA_REDIS_URL;
+const quotaRedis = quotaRedisUrl
+  ? new Redis(quotaRedisUrl, { enableOfflineQueue: false })
+  : null;
+const fallbackQuotaTracker = new Map();
+let quotaStoreFailureCount = 0;
 
 const profanityList = ['damn', 'shit', 'fuck'];
 
@@ -53,12 +60,24 @@ const scrubContent = (text) => {
   return scrubbed;
 };
 
-const checkQuota = (identifier) => {
+const logQuotaStoreFailure = (err) => {
+  quotaStoreFailureCount += 1;
+  console.warn('Quota store unavailable; using fallback tracker', {
+    error: err?.message || err,
+    failures: quotaStoreFailureCount,
+  });
+};
+
+if (quotaRedis) {
+  quotaRedis.on('error', (err) => logQuotaStoreFailure(err));
+}
+
+const checkQuotaFallback = (identifier) => {
   const now = Date.now();
-  const record = quotaTracker.get(identifier);
+  const record = fallbackQuotaTracker.get(identifier);
 
   if (!record || now - record.windowStart > QUOTA_WINDOW_MS) {
-    quotaTracker.set(identifier, { windowStart: now, count: 1 });
+    fallbackQuotaTracker.set(identifier, { windowStart: now, count: 1 });
     return true;
   }
 
@@ -68,6 +87,72 @@ const checkQuota = (identifier) => {
 
   record.count += 1;
   return true;
+};
+
+const getQuotaKey = (identifier) => `quota:${identifier}`;
+
+const incrementQuotaScript = `
+local key = KEYS[1]
+local window_ms = tonumber(ARGV[1])
+
+local count = redis.call('INCR', key)
+if count == 1 then
+  redis.call('PEXPIRE', key, window_ms)
+else
+  local ttl = redis.call('PTTL', key)
+  if ttl < 0 then
+    redis.call('PEXPIRE', key, window_ms)
+  end
+end
+
+return count
+`;
+
+let quotaScriptSha;
+const getQuotaScriptSha = async () => {
+  if (!quotaScriptSha && quotaRedis) {
+    quotaScriptSha = await quotaRedis.script('LOAD', incrementQuotaScript);
+  }
+
+  return quotaScriptSha;
+};
+
+const checkQuota = async (identifier) => {
+  if (quotaRedis) {
+    const key = getQuotaKey(identifier);
+    let scriptSha;
+
+    try {
+      scriptSha = await getQuotaScriptSha();
+      const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
+
+      if (incrementResult > QUOTA_MAX_REQUESTS) {
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      if (err?.message?.includes('NOSCRIPT')) {
+        try {
+          quotaScriptSha = undefined;
+          scriptSha = await getQuotaScriptSha();
+          const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
+
+          if (incrementResult > QUOTA_MAX_REQUESTS) {
+            return false;
+          }
+
+          return true;
+        } catch (reloadErr) {
+          logQuotaStoreFailure(reloadErr);
+        }
+      } else {
+        logQuotaStoreFailure(err);
+      }
+    }
+  }
+
+  return checkQuotaFallback(identifier);
 };
 
 const systemPrompts = {
@@ -535,7 +620,7 @@ app.prepare().then(() => {
     }
 
     const requesterId = `${req.ip || 'unknown-ip'}::${req.headers['x-user-id'] || 'anonymous'}`;
-    if (!checkQuota(requesterId)) {
+    if (!(await checkQuota(requesterId))) {
       console.warn(`Quota exceeded for ${requesterId}`);
       return res.status(429).json({ error: 'Usage quota exceeded. Please try later.' });
     }
