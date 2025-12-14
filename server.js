@@ -2,6 +2,8 @@ const express = require('express');
 const next = require('next');
 const OpenAI = require('openai');
 const rateLimit = require('express-rate-limit');
+const dns = require('dns').promises;
+const net = require('net');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -99,16 +101,20 @@ const PREVIEW_HOST_ALLOWLIST = (process.env.PREVIEW_HOST_ALLOWLIST || '')
   .map((host) => host.trim().toLowerCase())
   .filter(Boolean);
 
-const isPrivateAddress = (hostname) => {
-  if (!hostname) return true;
+const isPrivateIp = (ip) => {
+  if (!ip) return true;
 
-  const normalized = hostname.toLowerCase();
-  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+  if (ip === '127.0.0.1' || ip === '::1') {
     return true;
   }
 
-  // Match common private network ranges without DNS resolution
-  const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (net.isIP(ip) === 6) {
+    const normalized = ip.toLowerCase();
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // Unique local
+    if (normalized.startsWith('fe80') || normalized.startsWith('fec0')) return true; // Link-local/site-local
+  }
+
+  const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4Match) {
     const [octet1, octet2] = ipv4Match.slice(1).map(Number);
     if (octet1 === 10) return true;
@@ -116,6 +122,21 @@ const isPrivateAddress = (hostname) => {
     if (octet1 === 192 && octet2 === 168) return true;
     if (octet1 === 169 && octet2 === 254) return true;
     if (octet1 === 172 && octet2 >= 16 && octet2 <= 31) return true;
+  }
+
+  return false;
+};
+
+const isPrivateAddress = (hostname) => {
+  if (!hostname) return true;
+
+  const normalized = hostname.toLowerCase();
+  if (net.isIP(normalized)) {
+    return isPrivateIp(normalized);
+  }
+
+  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+    return true;
   }
 
   // Block obvious internal hostnames
@@ -126,34 +147,86 @@ const isPrivateAddress = (hostname) => {
   return false;
 };
 
-const isPreviewUrlAllowed = (rawUrl) => {
+const isHostnameResolvableToPublicIp = async (hostname) => {
   try {
-    const parsed = new URL(rawUrl);
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
+    const records = await dns.lookup(hostname, { all: true });
+    if (!records || records.length === 0) {
       return false;
     }
 
-    const hostname = parsed.hostname.toLowerCase();
-
-    if (PREVIEW_HOST_ALLOWLIST.length > 0) {
-      return PREVIEW_HOST_ALLOWLIST.includes(hostname);
-    }
-
-    return !isPrivateAddress(hostname);
+    return records.every((record) => !isPrivateIp(record.address));
   } catch (err) {
-    console.warn('Rejected preview URL:', err.message);
+    console.warn(`DNS lookup failed for ${hostname}:`, err.message);
     return false;
   }
 };
 
+const resolveSafeUrl = async (rawUrl, maxRedirects = 3) => {
+  let currentUrl;
+  try {
+    currentUrl = new URL(rawUrl);
+  } catch (err) {
+    console.warn('Rejected preview URL:', err.message);
+    return null;
+  }
+
+  if (!['http:', 'https:'].includes(currentUrl.protocol)) {
+    return null;
+  }
+
+  for (let i = 0; i <= maxRedirects; i += 1) {
+    const hostname = currentUrl.hostname.toLowerCase();
+
+    if (PREVIEW_HOST_ALLOWLIST.length > 0) {
+      if (!PREVIEW_HOST_ALLOWLIST.includes(hostname)) {
+        return null;
+      }
+    } else if (isPrivateAddress(hostname)) {
+      return null;
+    } else {
+      const isPublic = await isHostnameResolvableToPublicIp(hostname);
+      if (!isPublic) {
+        return null;
+      }
+    }
+
+    try {
+      const headResponse = await fetchWithTimeout(currentUrl.toString(), {
+        method: 'HEAD',
+        redirect: 'manual',
+        timeoutMs: 3000,
+      });
+
+      if (headResponse.status >= 300 && headResponse.status < 400 && headResponse.headers.has('location')) {
+        const location = headResponse.headers.get('location');
+        const nextUrl = new URL(location, currentUrl);
+        if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+          return null;
+        }
+        currentUrl = nextUrl;
+        continue;
+      }
+
+      return currentUrl.toString();
+    } catch (err) {
+      console.warn('Preview HEAD request failed:', err.message);
+      return null;
+    }
+  }
+
+  return null;
+};
+
 const fetchLinkPreview = async (url) => {
-  if (!isPreviewUrlAllowed(url)) {
+  const safeUrl = await resolveSafeUrl(url);
+
+  if (!safeUrl) {
     return { url };
   }
 
   try {
     const noEmbedResponse = await fetchWithTimeout(
-      `https://noembed.com/embed?url=${encodeURIComponent(url)}`,
+      `https://noembed.com/embed?url=${encodeURIComponent(safeUrl)}`,
       { timeoutMs: 4000 },
     );
 
@@ -165,7 +238,7 @@ const fetchLinkPreview = async (url) => {
           description: data.author_name,
           image: data.thumbnail_url,
           siteName: data.provider_name,
-          url,
+          url: safeUrl,
         };
       }
     }
@@ -174,7 +247,7 @@ const fetchLinkPreview = async (url) => {
   }
 
   try {
-    const response = await fetchWithTimeout(url, { timeoutMs: 4000 });
+    const response = await fetchWithTimeout(safeUrl, { timeoutMs: 4000 });
     if (!response.ok) throw new Error(`Status ${response.status}`);
     const html = await response.text();
 
@@ -188,7 +261,7 @@ const fetchLinkPreview = async (url) => {
         parseMetaTag(html, 'twitter:description'),
       image: parseMetaTag(html, 'og:image') || parseMetaTag(html, 'twitter:image'),
       siteName: parseMetaTag(html, 'og:site_name'),
-      url,
+      url: safeUrl,
     };
   } catch (err) {
     console.warn('Open Graph lookup failed:', err.message);
