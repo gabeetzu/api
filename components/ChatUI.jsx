@@ -18,6 +18,9 @@ export default function ChatUI({ mode, presetPrompt }) {
   const [loading, setLoading] = useState(false);
   const [streamStatus, setStreamStatus] = useState('idle');
   const [activeAssistantId, setActiveAssistantId] = useState(null);
+  const [isUserNearBottom, setIsUserNearBottom] = useState(true);
+  const scrollContainerRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const presetHandledRef = useRef('');
 
   const generateId = () =>
@@ -191,6 +194,7 @@ export default function ChatUI({ mode, presetPrompt }) {
     if (!messageText?.trim()) return;
 
     const userText = messageText.trim();
+    setIsUserNearBottom(true);
     const userMessage = { role: 'user', content: userText, type: detectMessageType(userText) };
     setMessages((prev) => [...prev, userMessage]);
     const nextConversation = [...baseConversation, userMessage];
@@ -214,6 +218,33 @@ export default function ChatUI({ mode, presetPrompt }) {
     presetHandledRef.current = presetPrompt;
     sendMessage(presetPrompt, conversation);
   }, [conversation, mode, presetPrompt]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return undefined;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const distanceToBottom = scrollHeight - (scrollTop + clientHeight);
+      setIsUserNearBottom(distanceToBottom < 80);
+    };
+
+    handleScroll();
+    container.addEventListener('scroll', handleScroll);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isUserNearBottom) return;
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    } else if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [messages, isUserNearBottom]);
 
   const messageRenderer = useMemo(
     () => ({
@@ -271,7 +302,10 @@ export default function ChatUI({ mode, presetPrompt }) {
     <div className="chat-shell glass-card overflow-hidden">
       <div className="absolute inset-0 pointer-events-none holo-grid" aria-hidden />
       <div className="relative space-y-4">
-        <div className="holo-panel space-y-4 max-h-[420px] overflow-y-auto pr-2">
+        <div
+          ref={scrollContainerRef}
+          className="holo-panel space-y-4 max-h-[420px] overflow-y-auto pr-2"
+        >
           {messages.map((msg, idx) => (
             <div
               key={msg.id || idx}
@@ -300,6 +334,7 @@ export default function ChatUI({ mode, presetPrompt }) {
               </div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="flex-1 rounded-full border border-white/10 bg-[radial-gradient(circle_at_20%_50%,rgba(77,232,244,0.18),transparent_32%),radial-gradient(circle_at_80%_50%,rgba(255,63,164,0.16),transparent_32%),rgba(255,255,255,0.04)] shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_10px_40px_rgba(0,0,0,0.35)]">
