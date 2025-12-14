@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const greetings = {
   comfort:
@@ -11,22 +11,27 @@ const greetings = {
   chat: "Hi there! I'm your VR companion. Ask me anything about VR!",
 };
 
-export default function ChatUI({ mode }) {
+export default function ChatUI({ mode, presetPrompt }) {
   const [messages, setMessages] = useState([]);
   const [conversation, setConversation] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const presetHandledRef = useRef('');
 
   useEffect(() => {
     if (mode && greetings[mode]) {
       const greetingMessage = { role: 'assistant', type: 'text', content: greetings[mode] };
       setMessages([greetingMessage]);
       setConversation([greetingMessage]);
+      setInput(presetPrompt || '');
+      presetHandledRef.current = '';
     } else {
       setMessages([]);
       setConversation([]);
+      setInput('');
+      presetHandledRef.current = '';
     }
-  }, [mode]);
+  }, [mode, presetPrompt]);
 
   const detectMessageType = (text) => {
     const urlRegex = /https?:\/\/[^\s]+/i;
@@ -37,15 +42,18 @@ export default function ChatUI({ mode }) {
     return 'link';
   };
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+  const sendMessage = async (payloadText, baseConversation = conversation) => {
+    const messageText = typeof payloadText === 'string' ? payloadText : input;
+    if (!messageText?.trim()) return;
 
-    const userText = input.trim();
+    const userText = messageText.trim();
     const userMessage = { role: 'user', content: userText, type: detectMessageType(userText) };
     setMessages((prev) => [...prev, userMessage]);
-    const nextConversation = [...conversation, userMessage];
+    const nextConversation = [...baseConversation, userMessage];
     setConversation(nextConversation);
-    setInput('');
+    if (typeof payloadText !== 'string') {
+      setInput('');
+    }
     setLoading(true);
 
     try {
@@ -93,6 +101,13 @@ export default function ChatUI({ mode }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!presetPrompt || presetHandledRef.current === presetPrompt) return;
+    if (!conversation.length && mode) return;
+    presetHandledRef.current = presetPrompt;
+    sendMessage(presetPrompt, conversation);
+  }, [conversation, mode, presetPrompt]);
 
   const messageRenderer = useMemo(
     () => ({
