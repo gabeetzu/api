@@ -119,9 +119,11 @@ const getQuotaScriptSha = async () => {
 
 const checkQuota = async (identifier) => {
   if (quotaRedis) {
+    const key = getQuotaKey(identifier);
+    let scriptSha;
+
     try {
-      const key = getQuotaKey(identifier);
-      const scriptSha = await getQuotaScriptSha();
+      scriptSha = await getQuotaScriptSha();
       const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
 
       if (incrementResult > QUOTA_MAX_REQUESTS) {
@@ -130,7 +132,23 @@ const checkQuota = async (identifier) => {
 
       return true;
     } catch (err) {
-      logQuotaStoreFailure(err);
+      if (err?.message?.includes('NOSCRIPT')) {
+        try {
+          quotaScriptSha = undefined;
+          scriptSha = await getQuotaScriptSha();
+          const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
+
+          if (incrementResult > QUOTA_MAX_REQUESTS) {
+            return false;
+          }
+
+          return true;
+        } catch (reloadErr) {
+          logQuotaStoreFailure(reloadErr);
+        }
+      } else {
+        logQuotaStoreFailure(err);
+      }
     }
   }
 
