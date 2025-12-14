@@ -708,29 +708,64 @@ app.prepare().then(() => {
         model: 'gpt-4o-mini',
         input: scrubbedMessages,
         max_output_tokens: 700,
+        stream: true,
       };
 
       if (mode && systemPrompts[mode]) {
         requestPayload.instructions = systemPrompts[mode];
       }
 
-      const response = await openai.responses.create(requestPayload);
-      const assistantContent = response.output_text?.trim() ?? '';
-
+      const responseStream = await openai.responses.create(requestPayload);
       const enrichedUserMessage = await enrichMessage(sanitizedMessages[sanitizedMessages.length - 1]);
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      const sendEvent = (payload) => {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        res.flush?.();
+      };
+
+      if (enrichedUserMessage) {
+        sendEvent({ type: 'enrichedUser', data: enrichedUserMessage });
+      }
+
+      let assistantContent = '';
+
+      for await (const event of responseStream) {
+        if (event.type === 'response.output_text.delta' && event.delta) {
+          assistantContent += event.delta;
+          sendEvent({ type: 'delta', data: event.delta });
+        } else if (event.type === 'error' || event.error) {
+          throw new Error(event.error || 'Stream error');
+        }
+      }
+
       const assistantEnrichment = await enrichMessage({ content: assistantContent });
 
-      res.json({
-        assistant: {
-          role: 'assistant',
-          content: assistantContent,
-          type: assistantEnrichment.type || 'text',
-          metadata: assistantEnrichment.metadata,
+      sendEvent({
+        type: 'done',
+        data: {
+          assistant: {
+            role: 'assistant',
+            content: assistantContent.trim(),
+            type: assistantEnrichment.type || 'text',
+            metadata: assistantEnrichment.metadata,
+          },
+          enrichedUser: enrichedUserMessage,
         },
-        enrichedUser: enrichedUserMessage,
       });
+
+      res.end();
     } catch (err) {
       console.error('OpenAI API error:', err);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ type: 'error', data: { message: 'Failed to get response from AI.' } })}\n\n`);
+        return res.end();
+      }
+
       res.status(500).json({ error: 'Failed to get response from AI.' });
     }
   });
