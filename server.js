@@ -89,21 +89,40 @@ const checkQuotaFallback = (identifier) => {
   return true;
 };
 
-const getQuotaKey = (identifier) => {
-  const windowBucket = Math.floor(Date.now() / QUOTA_WINDOW_MS);
-  return `quota:${identifier}:${windowBucket}`;
+const getQuotaKey = (identifier) => `quota:${identifier}`;
+
+const incrementQuotaScript = `
+local key = KEYS[1]
+local window_ms = tonumber(ARGV[1])
+
+local count = redis.call('INCR', key)
+if count == 1 then
+  redis.call('PEXPIRE', key, window_ms)
+else
+  local ttl = redis.call('PTTL', key)
+  if ttl < 0 then
+    redis.call('PEXPIRE', key, window_ms)
+  end
+end
+
+return count
+`;
+
+let quotaScriptSha;
+const getQuotaScriptSha = async () => {
+  if (!quotaScriptSha && quotaRedis) {
+    quotaScriptSha = await quotaRedis.script('LOAD', incrementQuotaScript);
+  }
+
+  return quotaScriptSha;
 };
 
 const checkQuota = async (identifier) => {
   if (quotaRedis) {
     try {
       const key = getQuotaKey(identifier);
-      const results = await quotaRedis.multi().incr(key).pexpire(key, QUOTA_WINDOW_MS).exec();
-
-      const incrementResult = results?.[0]?.[1];
-      if (typeof incrementResult !== 'number') {
-        throw new Error('Unexpected quota increment response');
-      }
+      const scriptSha = await getQuotaScriptSha();
+      const incrementResult = await quotaRedis.evalsha(scriptSha, 1, key, QUOTA_WINDOW_MS);
 
       if (incrementResult > QUOTA_MAX_REQUESTS) {
         return false;
