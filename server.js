@@ -16,6 +16,7 @@ const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 const ALLOWED_MODES = new Set(['comfort', 'troubleshoot', 'game', 'chat']);
 
 const URL_REGEX = /https?:\/\/[^\s]+/i;
+const PREVIEW_MAX_BODY_BYTES = Number(process.env.PREVIEW_MAX_BODY_BYTES) || 512 * 1024;
 
 const QUOTA_WINDOW_MS = Number(process.env.QUOTA_WINDOW_MS) || 60 * 60 * 1000;
 const QUOTA_MAX_REQUESTS = Number(process.env.QUOTA_MAX_REQUESTS) || 200;
@@ -113,6 +114,33 @@ const parseMetaTag = (html, name) => {
   const metaRegex = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i');
   const match = html.match(metaRegex);
   return match?.[1];
+};
+
+const readTextWithLimit = async (response, maxBytes) => {
+  if (!response?.body) {
+    throw new Error('Missing response body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let result = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new Error('Preview body too large');
+    }
+
+    result += decoder.decode(value, { stream: true });
+  }
+
+  result += decoder.decode();
+  return result;
 };
 
 const classifyUrlType = (url) => {
@@ -329,7 +357,21 @@ const fetchLinkPreview = async (url) => {
     if (!response || !response.ok || (response.status >= 300 && response.status < 400)) {
       throw new Error(`Status ${response?.status}`);
     }
-    const html = await response.text();
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('text')) {
+      throw new Error('Unsupported preview content type');
+    }
+
+    const contentLengthHeader = response.headers.get('content-length');
+    if (contentLengthHeader) {
+      const contentLength = Number.parseInt(contentLengthHeader, 10);
+      if (Number.isFinite(contentLength) && contentLength > PREVIEW_MAX_BODY_BYTES) {
+        throw new Error('Preview body exceeds configured size');
+      }
+    }
+
+    const html = await readTextWithLimit(response, PREVIEW_MAX_BODY_BYTES);
 
     return {
       title:

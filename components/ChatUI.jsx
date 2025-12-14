@@ -98,14 +98,20 @@ export default function ChatUI({ mode }) {
     () => ({
       text: (msg) => <p className="mt-2 leading-relaxed text-white/90">{msg.content}</p>,
       link: (msg) => (
-        <MessageCard message={msg} label="Link Preview">
-          <LinkPreview metadata={msg.metadata} fallbackUrl={msg.content} />
-        </MessageCard>
+        <div className="space-y-2">
+          <p className="mt-2 leading-relaxed text-white/90">{msg.content}</p>
+          <MessageCard message={msg} label="Link Preview">
+            <LinkPreview metadata={msg.metadata} fallbackUrl={msg.content} />
+          </MessageCard>
+        </div>
       ),
       video: (msg) => (
-        <MessageCard message={msg} label="Video">
-          <VideoPreview metadata={msg.metadata} fallbackUrl={msg.content} />
-        </MessageCard>
+        <div className="space-y-2">
+          <p className="mt-2 leading-relaxed text-white/90">{msg.content}</p>
+          <MessageCard message={msg} label="Video">
+            <VideoPreview metadata={msg.metadata} fallbackUrl={msg.content} />
+          </MessageCard>
+        </div>
       ),
     }),
     [],
