@@ -165,6 +165,20 @@ const isPrivateIp = (ip) => {
 
   if (net.isIP(ip) === 6) {
     const normalized = ip.toLowerCase();
+    const mappedIpv4 = normalized.match(/^::ffff:([0-9.]+)$/);
+    if (mappedIpv4) {
+      const mappedAddress = mappedIpv4[1];
+      const mappedMatch = mappedAddress.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (mappedMatch) {
+        const [mappedOctet1, mappedOctet2] = mappedMatch.slice(1).map(Number);
+        if (mappedOctet1 === 10) return true;
+        if (mappedOctet1 === 127) return true;
+        if (mappedOctet1 === 192 && mappedOctet2 === 168) return true;
+        if (mappedOctet1 === 169 && mappedOctet2 === 254) return true;
+        if (mappedOctet1 === 172 && mappedOctet2 >= 16 && mappedOctet2 <= 31) return true;
+      }
+    }
+
     if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // Unique local
     if (normalized.startsWith('fe80') || normalized.startsWith('fec0')) return true; // Link-local/site-local
   }
