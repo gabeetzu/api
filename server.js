@@ -249,9 +249,10 @@ const fetchLinkPreview = async (url) => {
   try {
     let currentUrl = safeUrl;
     let response;
+    const previewFetchOptions = { timeoutMs: 4000, redirect: 'manual' };
 
     for (let i = 0; i < 2; i += 1) {
-      response = await fetchWithTimeout(currentUrl, { timeoutMs: 4000, redirect: 'manual' });
+      response = await fetchWithTimeout(currentUrl, previewFetchOptions);
 
       if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
         const redirectedUrl = new URL(response.headers.get('location'), currentUrl).toString();
@@ -265,10 +266,18 @@ const fetchLinkPreview = async (url) => {
         continue;
       }
 
+      // Even though we explicitly request manual redirects, double check the response
+      // did not already follow a redirect to an unsafe target.
+      if (response.redirected) {
+        throw new Error('Preview fetch unexpectedly followed a redirect');
+      }
+
       break;
     }
 
-    if (!response || !response.ok) throw new Error(`Status ${response?.status}`);
+    if (!response || !response.ok || (response.status >= 300 && response.status < 400)) {
+      throw new Error(`Status ${response?.status}`);
+    }
     const html = await response.text();
 
     return {
