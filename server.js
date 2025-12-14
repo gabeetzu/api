@@ -94,7 +94,63 @@ const classifyUrlType = (url) => {
   return 'link';
 };
 
+const PREVIEW_HOST_ALLOWLIST = (process.env.PREVIEW_HOST_ALLOWLIST || '')
+  .split(',')
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
+
+const isPrivateAddress = (hostname) => {
+  if (!hostname) return true;
+
+  const normalized = hostname.toLowerCase();
+  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+    return true;
+  }
+
+  // Match common private network ranges without DNS resolution
+  const ipv4Match = normalized.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [octet1, octet2] = ipv4Match.slice(1).map(Number);
+    if (octet1 === 10) return true;
+    if (octet1 === 127) return true;
+    if (octet1 === 192 && octet2 === 168) return true;
+    if (octet1 === 169 && octet2 === 254) return true;
+    if (octet1 === 172 && octet2 >= 16 && octet2 <= 31) return true;
+  }
+
+  // Block obvious internal hostnames
+  if (/[.]local$|[.]internal$|[.]localhost$/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isPreviewUrlAllowed = (rawUrl) => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return false;
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (PREVIEW_HOST_ALLOWLIST.length > 0) {
+      return PREVIEW_HOST_ALLOWLIST.includes(hostname);
+    }
+
+    return !isPrivateAddress(hostname);
+  } catch (err) {
+    console.warn('Rejected preview URL:', err.message);
+    return false;
+  }
+};
+
 const fetchLinkPreview = async (url) => {
+  if (!isPreviewUrlAllowed(url)) {
+    return { url };
+  }
+
   try {
     const noEmbedResponse = await fetchWithTimeout(
       `https://noembed.com/embed?url=${encodeURIComponent(url)}`,
