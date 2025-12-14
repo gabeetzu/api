@@ -16,7 +16,14 @@ export default function ChatUI({ mode, presetPrompt }) {
   const [conversation, setConversation] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamStatus, setStreamStatus] = useState('idle');
+  const [activeAssistantId, setActiveAssistantId] = useState(null);
   const presetHandledRef = useRef('');
+
+  const generateId = () =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`);
 
   useEffect(() => {
     if (mode && greetings[mode]) {
@@ -42,6 +49,143 @@ export default function ChatUI({ mode, presetPrompt }) {
     return 'link';
   };
 
+  const updateLastUserMessage = (updates) => {
+    setMessages((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i >= 0; i -= 1) {
+        if (copy[i].role === 'user') {
+          copy[i] = { ...copy[i], ...updates };
+          break;
+        }
+      }
+      return copy;
+    });
+
+    setConversation((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i >= 0; i -= 1) {
+        if (copy[i].role === 'user') {
+          copy[i] = { ...copy[i], ...updates };
+          break;
+        }
+      }
+      return copy;
+    });
+  };
+
+  const updateAssistantMessage = (id, updates) => {
+    setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)));
+  };
+
+  const processStream = async (conversationSnapshot, assistantId, attempt = 0) => {
+    try {
+      setStreamStatus(attempt > 0 ? 'reconnecting' : 'streaming');
+
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: conversationSnapshot, mode }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody?.error || 'Request failed');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No stream available');
+      }
+
+      if (attempt > 0) {
+        updateAssistantMessage(assistantId, { content: '' });
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const handleEvent = (rawEvent) => {
+        if (!rawEvent?.trim()) return;
+        const normalized = rawEvent.startsWith('data:')
+          ? rawEvent.slice(5).trim()
+          : rawEvent.trim();
+
+        if (!normalized) return;
+
+        let parsed;
+        try {
+          parsed = JSON.parse(normalized);
+        } catch {
+          return;
+        }
+
+        if (parsed.type === 'enrichedUser' && parsed.data) {
+          updateLastUserMessage(parsed.data);
+          return;
+        }
+
+        if (parsed.type === 'delta' && typeof parsed.data === 'string') {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, content: `${msg.content || ''}${parsed.data}` }
+                : msg,
+            ),
+          );
+          return;
+        }
+
+        if (parsed.type === 'done' && parsed.data?.assistant) {
+          const { assistant, enrichedUser } = parsed.data;
+          updateAssistantMessage(assistantId, {
+            ...assistant,
+            streaming: false,
+          });
+          setConversation((prev) => [...prev, { id: assistantId, ...assistant }]);
+          if (enrichedUser) {
+            updateLastUserMessage(enrichedUser);
+          }
+          setStreamStatus('idle');
+          setLoading(false);
+          setActiveAssistantId(null);
+          return;
+        }
+
+        if (parsed.type === 'error') {
+          throw new Error(parsed.data?.message || 'Stream error');
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        events.forEach(handleEvent);
+        if (done) {
+          handleEvent(buffer);
+          break;
+        }
+      }
+
+      setStreamStatus('idle');
+      setLoading(false);
+      setActiveAssistantId(null);
+    } catch (err) {
+      console.error('Stream error:', err);
+      if (attempt < 1) {
+        return processStream(conversationSnapshot, assistantId, attempt + 1);
+      }
+      setStreamStatus('error');
+      setLoading(false);
+      updateAssistantMessage(assistantId, {
+        content: 'Connection lost. Please try again.',
+        error: true,
+      });
+      setActiveAssistantId(null);
+    }
+  };
+
   const sendMessage = async (payloadText, baseConversation = conversation) => {
     const messageText = typeof payloadText === 'string' ? payloadText : input;
     if (!messageText?.trim()) return;
@@ -56,50 +200,12 @@ export default function ChatUI({ mode, presetPrompt }) {
     }
     setLoading(true);
 
-    try {
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextConversation, mode }),
-      });
+    const assistantId = generateId();
+    const assistantPlaceholder = { id: assistantId, role: 'assistant', content: '', type: 'text', streaming: true };
+    setMessages((prev) => [...prev, assistantPlaceholder]);
+    setActiveAssistantId(assistantId);
 
-      const data = await response.json();
-
-      if (data?.enrichedUser) {
-        setMessages((prev) =>
-          prev.map((msg, idx) =>
-            idx === prev.length - 1 ? { ...msg, ...data.enrichedUser } : msg,
-          ),
-        );
-        setConversation((prev) =>
-          prev.map((msg, idx) =>
-            idx === prev.length - 1 ? { ...msg, ...data.enrichedUser } : msg,
-          ),
-        );
-      }
-
-      if (data.assistant) {
-        const assistantMessage =
-          typeof data.assistant === 'string'
-            ? { role: 'assistant', content: data.assistant, type: 'text' }
-            : { role: 'assistant', type: 'text', ...data.assistant };
-        setMessages((prev) => [...prev, assistantMessage]);
-        setConversation((prev) => [...prev, assistantMessage]);
-      } else if (data.error) {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: 'Oops, something went wrong. Please try again.' },
-        ]);
-      }
-    } catch (err) {
-      console.error('Error sending message:', err);
-      setMessages((prev) => [
-        ...prev,
-          { role: 'assistant', content: 'Network error. Please check your connection.' },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+    await processStream(nextConversation, assistantId);
   };
 
   useEffect(() => {
@@ -137,6 +243,30 @@ export default function ChatUI({ mode, presetPrompt }) {
     return renderer(msg);
   };
 
+  const isBusy = streamStatus === 'streaming' || streamStatus === 'reconnecting' || loading;
+  const statusMessage =
+    {
+      streaming: 'Receiving response…',
+      reconnecting: 'Connection dropped. Reconnecting…',
+      error: 'Stream interrupted. Please try again.',
+    }[streamStatus] || '';
+  const buttonLabel =
+    streamStatus === 'reconnecting'
+      ? 'Reconnecting'
+      : streamStatus === 'streaming'
+        ? 'Streaming'
+        : loading
+          ? 'Sending'
+          : 'Send';
+  const buttonIcon =
+    streamStatus === 'reconnecting'
+      ? '🔄'
+      : streamStatus === 'streaming'
+        ? '🌐'
+        : loading
+          ? '⏳'
+          : '🚀';
+
   return (
     <div className="chat-shell glass-card overflow-hidden">
       <div className="absolute inset-0 pointer-events-none holo-grid" aria-hidden />
@@ -144,7 +274,7 @@ export default function ChatUI({ mode, presetPrompt }) {
         <div className="holo-panel space-y-4 max-h-[420px] overflow-y-auto pr-2">
           {messages.map((msg, idx) => (
             <div
-              key={idx}
+              key={msg.id || idx}
               className={`message-row ${msg.role === 'assistant' ? 'assistant' : 'user'}`}
             >
               <div className={`message-avatar ${msg.role === 'assistant' ? 'assistant' : 'user'}`}>
@@ -158,6 +288,15 @@ export default function ChatUI({ mode, presetPrompt }) {
                   {msg.role === 'assistant' ? 'Assistant' : 'You'}
                 </div>
                 {renderMessageContent(msg)}
+                {msg.id === activeAssistantId && streamStatus === 'streaming' && (
+                  <p className="mt-1 text-xs text-white/70">Receiving response…</p>
+                )}
+                {msg.id === activeAssistantId && streamStatus === 'reconnecting' && (
+                  <p className="mt-1 text-xs text-amber-200">Connection lost. Reconnecting…</p>
+                )}
+                {msg.id === activeAssistantId && streamStatus === 'error' && (
+                  <p className="mt-1 text-xs text-rose-200">Stream interrupted. Please resend.</p>
+                )}
               </div>
             </div>
           ))}
@@ -170,7 +309,7 @@ export default function ChatUI({ mode, presetPrompt }) {
               placeholder="Type your message..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
+              disabled={isBusy}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -182,14 +321,17 @@ export default function ChatUI({ mode, presetPrompt }) {
           <button
             onClick={sendMessage}
             className="send-button sm:w-auto w-full"
-            disabled={loading}
+            disabled={isBusy}
           >
-            <span className="text-lg">{loading ? '⏳' : '🚀'}</span>
+            <span className="text-lg">{buttonIcon}</span>
             <span className="font-semibold tracking-[0.12em] uppercase">
-              {loading ? 'Sending' : 'Send'}
+              {buttonLabel}
             </span>
           </button>
         </div>
+        {statusMessage && (
+          <p className="text-xs text-white/70">{statusMessage}</p>
+        )}
       </div>
     </div>
   );
