@@ -12,6 +12,8 @@ const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const ALLOWED_MODES = new Set(['comfort', 'troubleshoot', 'game', 'chat']);
 
+const URL_REGEX = /https?:\/\/[^\s]+/i;
+
 const QUOTA_WINDOW_MS = Number(process.env.QUOTA_WINDOW_MS) || 60 * 60 * 1000;
 const QUOTA_MAX_REQUESTS = Number(process.env.QUOTA_MAX_REQUESTS) || 200;
 const quotaTracker = new Map();
@@ -66,6 +68,94 @@ const systemPrompts = {
     'You are a helpful AI assistant knowledgeable about VR. Engage in open conversation and answer questions about VR or any topic the user asks.',
 };
 
+const fetchWithTimeout = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 5000);
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const parseMetaTag = (html, name) => {
+  const metaRegex = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i');
+  const match = html.match(metaRegex);
+  return match?.[1];
+};
+
+const classifyUrlType = (url) => {
+  if (!url) return 'text';
+  if (/youtube\.com|youtu\.be|vimeo\.com/i.test(url)) {
+    return 'video';
+  }
+  return 'link';
+};
+
+const fetchLinkPreview = async (url) => {
+  try {
+    const noEmbedResponse = await fetchWithTimeout(
+      `https://noembed.com/embed?url=${encodeURIComponent(url)}`,
+      { timeoutMs: 4000 },
+    );
+
+    if (noEmbedResponse.ok) {
+      const data = await noEmbedResponse.json();
+      if (data?.title || data?.thumbnail_url) {
+        return {
+          title: data.title,
+          description: data.author_name,
+          image: data.thumbnail_url,
+          siteName: data.provider_name,
+          url,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('NoEmbed lookup failed:', err.message);
+  }
+
+  try {
+    const response = await fetchWithTimeout(url, { timeoutMs: 4000 });
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    const html = await response.text();
+
+    return {
+      title:
+        parseMetaTag(html, 'og:title') ||
+        parseMetaTag(html, 'twitter:title') ||
+        html.match(/<title>([^<]+)<\/title>/i)?.[1],
+      description:
+        parseMetaTag(html, 'og:description') ||
+        parseMetaTag(html, 'twitter:description'),
+      image: parseMetaTag(html, 'og:image') || parseMetaTag(html, 'twitter:image'),
+      siteName: parseMetaTag(html, 'og:site_name'),
+      url,
+    };
+  } catch (err) {
+    console.warn('Open Graph lookup failed:', err.message);
+  }
+
+  return { url };
+};
+
+const enrichMessage = async (message) => {
+  const content = message?.content || '';
+  const url = content.match(URL_REGEX)?.[0];
+
+  if (!url) {
+    return { type: 'text' };
+  }
+
+  const preview = await fetchLinkPreview(url);
+  return {
+    type: classifyUrlType(url),
+    metadata: preview,
+  };
+};
+
 app.prepare().then(() => {
   const server = express();
   server.set('trust proxy', 1);
@@ -116,6 +206,7 @@ app.prepare().then(() => {
       role: message?.role,
       content:
         typeof message?.content === 'string' ? message.content.trim() : message?.content,
+      type: message?.type || 'text',
     }));
 
     const hasInvalidMessage = sanitizedMessages.some(
@@ -193,8 +284,20 @@ app.prepare().then(() => {
       }
 
       const response = await openai.responses.create(requestPayload);
+      const assistantContent = response.output_text?.trim() ?? '';
 
-      res.json({ assistant: response.output_text?.trim() ?? '' });
+      const enrichedUserMessage = await enrichMessage(sanitizedMessages[sanitizedMessages.length - 1]);
+      const assistantEnrichment = await enrichMessage({ content: assistantContent });
+
+      res.json({
+        assistant: {
+          role: 'assistant',
+          content: assistantContent,
+          type: assistantEnrichment.type || 'text',
+          metadata: assistantEnrichment.metadata,
+        },
+        enrichedUser: enrichedUserMessage,
+      });
     } catch (err) {
       console.error('OpenAI API error:', err);
       res.status(500).json({ error: 'Failed to get response from AI.' });
