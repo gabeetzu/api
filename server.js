@@ -247,8 +247,28 @@ const fetchLinkPreview = async (url) => {
   }
 
   try {
-    const response = await fetchWithTimeout(safeUrl, { timeoutMs: 4000 });
-    if (!response.ok) throw new Error(`Status ${response.status}`);
+    let currentUrl = safeUrl;
+    let response;
+
+    for (let i = 0; i < 2; i += 1) {
+      response = await fetchWithTimeout(currentUrl, { timeoutMs: 4000, redirect: 'manual' });
+
+      if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
+        const redirectedUrl = new URL(response.headers.get('location'), currentUrl).toString();
+        const sanitizedRedirect = await resolveSafeUrl(redirectedUrl);
+
+        if (!sanitizedRedirect) {
+          throw new Error('Redirected to unsafe URL during preview fetch');
+        }
+
+        currentUrl = sanitizedRedirect;
+        continue;
+      }
+
+      break;
+    }
+
+    if (!response || !response.ok) throw new Error(`Status ${response?.status}`);
     const html = await response.text();
 
     return {
@@ -261,7 +281,7 @@ const fetchLinkPreview = async (url) => {
         parseMetaTag(html, 'twitter:description'),
       image: parseMetaTag(html, 'og:image') || parseMetaTag(html, 'twitter:image'),
       siteName: parseMetaTag(html, 'og:site_name'),
-      url: safeUrl,
+      url: response.url || currentUrl,
     };
   } catch (err) {
     console.warn('Open Graph lookup failed:', err.message);
