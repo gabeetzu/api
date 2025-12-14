@@ -2,6 +2,7 @@ const express = require('express');
 const next = require('next');
 const OpenAI = require('openai');
 const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 const dns = require('dns').promises;
 const net = require('net');
 const { Agent } = require('undici');
@@ -14,6 +15,14 @@ const openAiApiKey = process.env.OPENAI_API_KEY;
 const openai = openAiApiKey ? new OpenAI({ apiKey: openAiApiKey }) : null;
 
 const ALLOWED_MODES = new Set(['comfort', 'troubleshoot', 'game', 'chat']);
+
+const parseListEnv = (value) =>
+  (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const ALLOWED_ORIGINS = new Set(parseListEnv(process.env.ALLOWED_ORIGINS));
 
 const URL_REGEX = /https?:\/\/[^\s]+/i;
 const PREVIEW_MAX_BODY_BYTES = Number(process.env.PREVIEW_MAX_BODY_BYTES) || 512 * 1024;
@@ -424,6 +433,78 @@ const enrichMessage = async (message) => {
 app.prepare().then(() => {
   const server = express();
   server.set('trust proxy', 1);
+
+  const hostToOrigins = (hostHeader) => {
+    if (!hostHeader) return [];
+    return [`https://${hostHeader}`, `http://${hostHeader}`];
+  };
+
+  const parseOriginHeader = (value) => {
+    if (!value) return null;
+    try {
+      return new URL(value).origin;
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const isAllowedOrigin = (origin, hostHeader) => {
+    if (!origin) return true; // Non-browser or same-origin fetch without Origin header
+
+    const allowedForHost = hostToOrigins(hostHeader);
+    if (allowedForHost.includes(origin)) {
+      return true;
+    }
+
+    return ALLOWED_ORIGINS.has(origin);
+  };
+
+  const checkOriginMiddleware = (req, res, next) => {
+    const hostHeader = req.get('host');
+    const origin = parseOriginHeader(req.get('origin'));
+    const refererOrigin = parseOriginHeader(req.get('referer'));
+
+    const originAllowed = isAllowedOrigin(origin, hostHeader);
+    const refererAllowed = isAllowedOrigin(refererOrigin, hostHeader);
+
+    if (!originAllowed || !refererAllowed) {
+      return res.status(403).json({ error: 'Origin not allowed.' });
+    }
+
+    return next();
+  };
+
+  const trustedScriptSources = ["'self'", ...parseListEnv(process.env.CSP_SCRIPT_SRC)];
+  const trustedMediaSources = ["'self'", ...parseListEnv(process.env.CSP_MEDIA_SRC)];
+  const trustedFrameSources = ["'self'", ...parseListEnv(process.env.CSP_FRAME_SRC)];
+
+  server.use(
+    helmet({
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      frameguard: { action: 'sameorigin' },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: trustedScriptSources,
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          fontSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          frameSrc: trustedFrameSources,
+          mediaSrc: trustedMediaSources,
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+        },
+      },
+    }),
+  );
+
   server.use(express.json());
 
   const askLimiter = rateLimit({
@@ -445,7 +526,7 @@ app.prepare().then(() => {
     });
   });
 
-  server.post('/api/ask', askLimiter, async (req, res) => {
+  server.post('/api/ask', checkOriginMiddleware, askLimiter, async (req, res) => {
     const { messages, mode } = req.body;
 
     if (mode && !ALLOWED_MODES.has(mode)) {
