@@ -170,10 +170,18 @@ if (quotaRedis) {
   quotaRedis.on('error', (err) => logQuotaStoreFailure(err));
 }
 
-['SIGINT', 'SIGTERM', 'exit'].forEach((event) => {
-  process.on(event, () => {
-    stopFallbackCleanup();
-  });
+const handleShutdownSignal = (signal) => {
+  stopFallbackCleanup();
+  process.removeListener(signal, handleShutdownSignal);
+  process.kill(process.pid, signal);
+};
+
+['SIGINT', 'SIGTERM'].forEach((event) => {
+  process.on(event, handleShutdownSignal);
+});
+
+process.on('exit', () => {
+  stopFallbackCleanup();
 });
 
 const checkQuotaFallback = (identifier) => {
